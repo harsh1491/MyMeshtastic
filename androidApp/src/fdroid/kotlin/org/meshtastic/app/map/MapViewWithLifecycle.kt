@@ -37,6 +37,13 @@ import org.osmdroid.util.GeoPoint
 import org.osmdroid.views.CustomZoomButtonsController
 import org.osmdroid.views.MapView
 
+import android.os.Environment
+import org.osmdroid.tileprovider.MapTileProviderBasic
+import org.osmdroid.tileprovider.tilesource.FileBasedTileSource
+import org.osmdroid.tileprovider.modules.OfflineTileProvider
+import org.osmdroid.tileprovider.util.SimpleRegisterReceiver
+import java.io.File
+
 private const val MIN_ZOOM_LEVEL = 1.5
 private const val MAX_ZOOM_LEVEL = 20.0
 private const val DEFAULT_ZOOM_LEVEL = 15.0
@@ -90,7 +97,24 @@ internal fun rememberMapViewWithLifecycle(
 
             // Required to get online tiles
             Configuration.getInstance().userAgentValue = applicationId
-            setTileSource(tileSource)
+
+            // Offline MBTiles support — place your file at:
+            // Internal Storage/offline_maps/india.mbtiles
+            val mbtilesFile = File(
+                Environment.getExternalStorageDirectory(),
+                "offline_maps/india.mbtiles"
+            )
+            if (mbtilesFile.exists()) {
+                val offlineProvider = OfflineTileProvider(
+                    SimpleRegisterReceiver(context),
+                    arrayOf(mbtilesFile)
+                )
+                tileProvider = offlineProvider
+                val src = offlineProvider.getTileSource()?.name() ?: "mbtiles"
+                setTileSource(FileBasedTileSource.getSource(src))
+            } else {
+                setTileSource(tileSource)
+            }
             isVerticalMapRepetitionEnabled = false // disables map repetition
             setMultiTouchControls(true)
             val bounds = overlayManager.tilesOverlay.bounds // bounds scrollable map

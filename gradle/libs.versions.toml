@@ -6,6 +6,8 @@ agp = "9.2.1"
 appcompat = "1.7.1"
 accompanist = "0.37.3"
 
+maplibre = "11.8.5"
+
 # androidx
 datastore = "1.2.1"
 glance = "1.2.0-rc01"
@@ -93,6 +95,8 @@ takpacket-sdk = "0.2.3"
 [libraries]
 xmlutil-core = { module = "io.github.pdvrieze.xmlutil:core", version.ref = "xmlutil" }
 xmlutil-serialization = { module = "io.github.pdvrieze.xmlutil:serialization", version.ref = "xmlutil" }
+
+maplibre-android = { module = "org.maplibre.gl:android-sdk", version.ref = "maplibre" }
 
 # AndroidX
 androidx-activity-compose = { module = "androidx.activity:activity-compose", version = "1.13.0" }

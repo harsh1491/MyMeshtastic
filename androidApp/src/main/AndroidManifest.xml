@@ -82,6 +82,8 @@
     <!-- NFC permission for sharing channels and contacts -->
     <uses-permission android:name="android.permission.NFC" />
 
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
+
     <uses-feature
         android:name="android.hardware.camera"
         android:required="false" />
