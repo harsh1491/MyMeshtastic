@@ -13,5 +13,6 @@ data class MapZone(
     val centerLat: Double,
     val centerLon: Double,
     val radiusMeters: Double,
-    val color: ZoneColor
+    val color: ZoneColor,
+    val isLocal: Boolean = true  // true = created on this device, false = received
 )

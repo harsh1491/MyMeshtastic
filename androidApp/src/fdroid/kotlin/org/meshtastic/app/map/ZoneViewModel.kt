@@ -15,7 +15,21 @@ class ZoneViewModel : ViewModel() {
         _zones.value = _zones.value + zone
     }
 
-    fun deleteZone(zoneId: String) {
+    // Only called when receiving from remote — marks as not local
+    fun addZoneFromRemote(zone: MapZone) {
+        _zones.value = _zones.value + zone.copy(isLocal = false)
+    }
+
+    // Only allows deletion of locally created zones
+    fun deleteZone(zoneId: String): Boolean {
+        val zone = _zones.value.find { it.id == zoneId } ?: return false
+        if (!zone.isLocal) return false  // cannot delete remote zones
+        _zones.value = _zones.value.filter { it.id != zoneId }
+        return true
+    }
+
+    // Force delete regardless of ownership — used internally for remote delete commands
+    fun forceDeleteZone(zoneId: String) {
         _zones.value = _zones.value.filter { it.id != zoneId }
     }
 
@@ -25,7 +39,14 @@ class ZoneViewModel : ViewModel() {
         }
     }
 
-    // Haversine distance formula
+    // Returns null if zone is not local (can't delete)
+    fun getLocalZoneAtPoint(lat: Double, lon: Double): MapZone? {
+        return _zones.value.firstOrNull { zone ->
+            zone.isLocal &&
+                    distanceMeters(lat, lon, zone.centerLat, zone.centerLon) <= zone.radiusMeters
+        }
+    }
+
     fun distanceMeters(lat1: Double, lon1: Double, lat2: Double, lon2: Double): Double {
         val r = 6371000.0
         val phi1 = Math.toRadians(lat1)

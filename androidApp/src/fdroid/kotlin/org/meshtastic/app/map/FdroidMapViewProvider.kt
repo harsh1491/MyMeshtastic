@@ -250,12 +250,26 @@ class FdroidMapViewProvider : MapViewProvider {
                             map.addOnMapClickListener { latLng ->
                                 when (interactionMode) {
                                     MapInteractionMode.DELETE_ZONE -> {
-                                        val zone = zoneViewModel.getZoneAtPoint(
+                                        // Only get local zones — can't delete received zones
+                                        val zone = zoneViewModel.getLocalZoneAtPoint(
                                             latLng.latitude, latLng.longitude
                                         )
                                         if (zone != null) {
                                             zoneToDelete = zone
                                             showDeleteConfirm = true
+                                        } else {
+                                            // Tapped a remote zone or empty area
+                                            val remoteZone = zoneViewModel.getZoneAtPoint(
+                                                latLng.latitude, latLng.longitude
+                                            )
+                                            if (remoteZone != null) {
+                                                // Show message that this zone can't be deleted
+                                                android.widget.Toast.makeText(
+                                                    context,
+                                                    "You can only delete zones you created",
+                                                    android.widget.Toast.LENGTH_SHORT
+                                                ).show()
+                                            }
                                         }
                                         true
                                     }
@@ -430,14 +444,15 @@ class FdroidMapViewProvider : MapViewProvider {
                             Button(
                                 onClick = {
                                     pendingZoneCenter?.let { center ->
-                                        zoneViewModel.addZone(
-                                            MapZone(
-                                                centerLat = center.latitude,
-                                                centerLon = center.longitude,
-                                                radiusMeters = pendingZoneRadius,
-                                                color = color
-                                            )
+                                        val newZone = MapZone(
+                                            centerLat = center.latitude,
+                                            centerLon = center.longitude,
+                                            radiusMeters = pendingZoneRadius,
+                                            color = color
                                         )
+                                        zoneViewModel.addZone(newZone)
+                                        // Send zone to all mesh nodes
+                                        mapViewModel.sendZone(newZone)
                                     }
                                     showColorPicker = false
                                     interactionMode = MapInteractionMode.NONE
@@ -465,7 +480,11 @@ class FdroidMapViewProvider : MapViewProvider {
                 confirmButton = {
                     Button(
                         onClick = {
-                            zoneToDelete?.let { zoneViewModel.deleteZone(it.id) }
+                            val zone = zoneToDelete
+                            if (zone != null) {
+                                zoneViewModel.deleteZone(zone.id)
+                                mapViewModel.sendZoneDelete(zone)
+                            }
                             showDeleteConfirm = false
                             zoneToDelete = null
                             interactionMode = MapInteractionMode.NONE

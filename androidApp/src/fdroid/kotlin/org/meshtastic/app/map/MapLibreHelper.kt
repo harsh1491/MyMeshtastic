@@ -46,6 +46,7 @@ object MapLibreHelper {
         feature.addStringProperty("id", zone.id)
         feature.addStringProperty("color", zone.color.hex)
         feature.addNumberProperty("alpha", zone.color.alpha)
+        feature.addBooleanProperty("isLocal", zone.isLocal)
         return feature
     }
 
@@ -53,19 +54,37 @@ object MapLibreHelper {
         val style = map.style ?: return
 
         val sourceId = "zones-source"
-        val layerId = "zones-layer"
-        val outlineId = "zones-outline"
+        val localLayerId = "zones-layer-local"
+        val localOutlineId = "zones-outline-local"
+        val remoteLayerId = "zones-layer-remote"
+        val remoteOutlineId = "zones-outline-remote"
 
-        try { style.removeLayer(outlineId) } catch (_: Exception) {}
-        try { style.removeLayer(layerId) } catch (_: Exception) {}
+        // Remove all existing zone layers
+        try { style.removeLayer(localOutlineId) } catch (_: Exception) {}
+        try { style.removeLayer(localLayerId) } catch (_: Exception) {}
+        try { style.removeLayer(remoteOutlineId) } catch (_: Exception) {}
+        try { style.removeLayer(remoteLayerId) } catch (_: Exception) {}
         try { style.removeSource(sourceId) } catch (_: Exception) {}
 
-        val features = zones.map { zoneToFeature(it) }
-        val collection = FeatureCollection.fromFeatures(features)
+        if (zones.isEmpty()) return
 
+        // Add isLocal as a property on each feature
+        val features = zones.map { zone ->
+            val feature = zoneToFeature(zone)
+            feature.addBooleanProperty("isLocal", zone.isLocal)
+            feature
+        }
+        val collection = FeatureCollection.fromFeatures(features)
         style.addSource(GeoJsonSource(sourceId, collection))
 
-        val fillLayer = FillLayer(layerId, sourceId).apply {
+        // ── Local zones — colored fill, thin colored outline ──
+        val localFill = FillLayer(localLayerId, sourceId).apply {
+            setFilter(
+                org.maplibre.android.style.expressions.Expression.eq(
+                    org.maplibre.android.style.expressions.Expression.get("isLocal"),
+                    org.maplibre.android.style.expressions.Expression.literal(true)
+                )
+            )
             setProperties(
                 PropertyFactory.fillColor(
                     org.maplibre.android.style.expressions.Expression.get("color")
@@ -73,9 +92,15 @@ object MapLibreHelper {
                 PropertyFactory.fillOpacity(0.35f)
             )
         }
-        style.addLayer(fillLayer)
+        style.addLayer(localFill)
 
-        val lineLayer = LineLayer(outlineId, sourceId).apply {
+        val localOutline = LineLayer(localOutlineId, sourceId).apply {
+            setFilter(
+                org.maplibre.android.style.expressions.Expression.eq(
+                    org.maplibre.android.style.expressions.Expression.get("isLocal"),
+                    org.maplibre.android.style.expressions.Expression.literal(true)
+                )
+            )
             setProperties(
                 PropertyFactory.lineColor(
                     org.maplibre.android.style.expressions.Expression.get("color")
@@ -83,7 +108,39 @@ object MapLibreHelper {
                 PropertyFactory.lineWidth(2f)
             )
         }
-        style.addLayer(lineLayer)
+        style.addLayer(localOutline)
+
+        // ── Remote zones — same colored fill, BLUE outline ──
+        val remoteFill = FillLayer(remoteLayerId, sourceId).apply {
+            setFilter(
+                org.maplibre.android.style.expressions.Expression.eq(
+                    org.maplibre.android.style.expressions.Expression.get("isLocal"),
+                    org.maplibre.android.style.expressions.Expression.literal(false)
+                )
+            )
+            setProperties(
+                PropertyFactory.fillColor(
+                    org.maplibre.android.style.expressions.Expression.get("color")
+                ),
+                PropertyFactory.fillOpacity(0.35f)
+            )
+        }
+        style.addLayer(remoteFill)
+
+        val remoteOutline = LineLayer(remoteOutlineId, sourceId).apply {
+            setFilter(
+                org.maplibre.android.style.expressions.Expression.eq(
+                    org.maplibre.android.style.expressions.Expression.get("isLocal"),
+                    org.maplibre.android.style.expressions.Expression.literal(false)
+                )
+            )
+            setProperties(
+                PropertyFactory.lineColor("#1565C0"),  // strong blue
+                PropertyFactory.lineWidth(3f),          // slightly thicker
+                PropertyFactory.lineDasharray(arrayOf(4f, 2f))  // dashed blue border
+            )
+        }
+        style.addLayer(remoteOutline)
     }
 
     // Uses MapLibre Annotations API — always renders on top

@@ -44,6 +44,8 @@ import org.meshtastic.core.ui.viewmodel.stateInWhileSubscribed
 import org.meshtastic.proto.Position
 import org.meshtastic.proto.Waypoint
 
+
+
 /**
  * Shared base ViewModel for the map feature, providing node data, waypoints, map filter preferences, and traceroute
  * overlay state.
