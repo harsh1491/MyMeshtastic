@@ -1,49 +1,171 @@
 package org.meshtastic.app.map
 
+import android.annotation.SuppressLint
 import android.os.Environment
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.FloatingActionButton
+import androidx.compose.material3.Icon
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import org.koin.compose.viewmodel.koinViewModel
 import org.koin.core.annotation.Single
 import org.maplibre.android.MapLibre
+import org.maplibre.android.camera.CameraUpdateFactory
+import org.maplibre.android.geometry.LatLng
+import org.maplibre.android.location.LocationComponentActivationOptions
+import org.maplibre.android.location.modes.CameraMode
+import org.maplibre.android.location.modes.RenderMode
+import org.maplibre.android.maps.MapLibreMap
 import org.maplibre.android.maps.MapView
 import org.maplibre.android.maps.Style
+import org.meshtastic.core.ui.icon.MeshtasticIcons
+import org.meshtastic.core.ui.icon.MyLocation
 import org.meshtastic.core.ui.util.MapViewProvider
 import java.io.File
 
-/** MapLibre + offline MBTiles implementation of [MapViewProvider]. */
+enum class MapInteractionMode { NONE, DRAW_ZONE, DELETE_ZONE }
+
 @Single
 class FdroidMapViewProvider : MapViewProvider {
     @Composable
-    override fun MapView(modifier: Modifier, navigateToNodeDetails: (Int) -> Unit, waypointId: Int?) {
+    override fun MapView(
+        modifier: Modifier,
+        navigateToNodeDetails: (Int) -> Unit,
+        waypointId: Int?
+    ) {
         val mapViewModel: MapViewModel = koinViewModel()
+        val zoneViewModel: ZoneViewModel = koinViewModel()
         LaunchedEffect(waypointId) { mapViewModel.setWaypointId(waypointId) }
 
         val context = LocalContext.current
         val lifecycle = LocalLifecycleOwner.current.lifecycle
 
-        // Initialize MapLibre engine
         MapLibre.getInstance(context)
 
-        val mapView = remember {
-            MapView(context)
+        // ── Persistent state (survives page switches) ──
+        var savedZoom by rememberSaveable { mutableStateOf(15.0) }
+        var savedLat by rememberSaveable { mutableStateOf<Double?>(null) }
+        var savedLon by rememberSaveable { mutableStateOf<Double?>(null) }
+        var hasMovedToLocation by rememberSaveable { mutableStateOf(false) }
+
+        // ── Ephemeral state ──
+        var mapLibreMap by remember { mutableStateOf<MapLibreMap?>(null) }
+        var interactionMode by remember { mutableStateOf(MapInteractionMode.NONE) }
+        var showColorPicker by remember { mutableStateOf(false) }
+        var pendingZoneCenter by remember { mutableStateOf<LatLng?>(null) }
+        var pendingZoneRadius by remember { mutableStateOf(0.0) }
+        var showDeleteConfirm by remember { mutableStateOf(false) }
+        var zoneToDelete by remember { mutableStateOf<MapZone?>(null) }
+        var styleLoaded by remember { mutableStateOf(false) }
+        var isDrawingZone by remember { mutableStateOf(false) }
+        var zoneTouchHandler by remember { mutableStateOf<ZoneTouchHandler?>(null) }
+
+        val zones by zoneViewModel.zones.collectAsStateWithLifecycle()
+        val nodes by mapViewModel.nodes.collectAsStateWithLifecycle()
+
+        // ── Update zones ──
+        LaunchedEffect(zones, styleLoaded) {
+            if (styleLoaded) {
+                mapLibreMap?.let { MapLibreHelper.updateZoneLayers(it, zones) }
+            }
         }
 
-        // Handle lifecycle events
+        // ── Update node markers ──
+        LaunchedEffect(nodes, styleLoaded, mapLibreMap) {
+            if (!styleLoaded) return@LaunchedEffect
+            val map = mapLibreMap ?: return@LaunchedEffect
+
+            kotlinx.coroutines.delay(300)
+
+            val markerData = nodes.filter { it.validPosition != null }.map { node ->
+                NodeMarkerData(
+                    id = node.num.toString(),
+                    lat = node.latitude,
+                    lon = node.longitude,
+                    shortName = node.user.short_name ?: "?"
+                )
+            }
+
+            android.util.Log.d("MarkerDebug", "Updating ${markerData.size} markers")
+            markerData.forEach {
+                android.util.Log.d("MarkerDebug", "  → ${it.shortName} at ${it.lat}, ${it.lon}")
+            }
+
+            MapLibreHelper.updateNodeMarkers(map, markerData)
+        }
+
+        // ── Auto move to my location once ──
+        LaunchedEffect(styleLoaded) {
+            if (styleLoaded && !hasMovedToLocation) {
+                val map = mapLibreMap ?: return@LaunchedEffect
+                // Wait a moment for location component to get a fix
+                kotlinx.coroutines.delay(1000)
+                val loc = map.locationComponent.lastKnownLocation
+                if (loc != null) {
+                    map.moveCamera(
+                        CameraUpdateFactory.newLatLngZoom(
+                            LatLng(loc.latitude, loc.longitude), 15.0
+                        )
+                    )
+                    savedLat = loc.latitude
+                    savedLon = loc.longitude
+                    savedZoom = 15.0
+                    hasMovedToLocation = true
+                } else {
+                    val lat = savedLat ?: 20.5937
+                    val lon = savedLon ?: 78.9629
+                    val zoom = if (savedLat != null) savedZoom else 5.0
+                    map.moveCamera(CameraUpdateFactory.newLatLngZoom(LatLng(lat, lon), zoom))
+                }
+            }
+        }
+
+        val mapView = remember { MapView(context) }
+
+        // ── Lifecycle + save camera on pause ──
         DisposableEffect(lifecycle) {
             val observer = LifecycleEventObserver { _, event ->
                 when (event) {
                     Lifecycle.Event.ON_START -> mapView.onStart()
                     Lifecycle.Event.ON_RESUME -> mapView.onResume()
-                    Lifecycle.Event.ON_PAUSE -> mapView.onPause()
+                    Lifecycle.Event.ON_PAUSE -> {
+                        mapLibreMap?.cameraPosition?.let { pos ->
+                            savedLat = pos.target?.latitude
+                            savedLon = pos.target?.longitude
+                            savedZoom = pos.zoom
+                        }
+                        mapView.onPause()
+                    }
                     Lifecycle.Event.ON_STOP -> mapView.onStop()
                     Lifecycle.Event.ON_DESTROY -> mapView.onDestroy()
                     else -> {}
@@ -53,57 +175,331 @@ class FdroidMapViewProvider : MapViewProvider {
             onDispose { lifecycle.removeObserver(observer) }
         }
 
-        AndroidView(
-            factory = {
-                mapView.apply {
-                    // Try multiple locations in order of preference
-                    val mbtilesFile = listOf(
-                        File(context.getExternalFilesDir(null), "india.mbtiles"),
-                        File(Environment.getExternalStorageDirectory(), "offline_maps/india.mbtiles"),
-                        File(Environment.getExternalStorageDirectory(), "Download/india.mbtiles")
-                    ).firstOrNull { it.exists() && it.canRead() }
+        Box(modifier = modifier.fillMaxSize()) {
 
-// ADD THIS LINE:
-                    android.util.Log.d("MapLibre", "MBTiles file: ${mbtilesFile?.absolutePath ?: "NOT FOUND"}")
+            AndroidView(
+                factory = {
+                    mapView.apply {
 
-                    getMapAsync { map ->
-                        // Check all possible file locations
                         val mbtilesFile = listOf(
                             File(context.getExternalFilesDir(null), "india.mbtiles"),
-                            File(Environment.getExternalStorageDirectory(), "offline_maps/india.mbtiles")
+                            File(
+                                Environment.getExternalStorageDirectory(),
+                                "offline_maps/india.mbtiles"
+                            ),
+                            File(
+                                Environment.getExternalStorageDirectory(),
+                                "Download/india.mbtiles"
+                            )
                         ).firstOrNull { it.exists() && it.canRead() }
 
-                        val styleJson = if (mbtilesFile != null) {
-                            MapStyleProvider.getOfflineStyleJson(mbtilesFile.absolutePath)
-                        } else {
-                            // Safe fallback - online OSM raster tiles, no file needed
-                            """
-        {
-          "version": 8,
-          "sources": {
-            "osm": {
-              "type": "raster",
-              "tiles": ["https://tile.openstreetmap.org/{z}/{x}/{y}.png"],
-              "tileSize": 256,
-              "attribution": "© OpenStreetMap contributors"
-            }
-          },
-          "layers": [{
-            "id": "osm",
-            "type": "raster",
-            "source": "osm"
-          }]
-        }
-        """.trimIndent()
+                        android.util.Log.d(
+                            "MapDebug",
+                            "MBTiles: ${mbtilesFile?.absolutePath ?: "NOT FOUND"}"
+                        )
+
+                        getMapAsync { map ->
+                            mapLibreMap = map
+
+                            val styleJson = if (mbtilesFile != null) {
+                                MapStyleProvider.getOfflineStyleJson(mbtilesFile.absolutePath)
+                            } else {
+                                """
+                                {
+                                  "version": 8,
+                                  "sources": {
+                                    "osm": {
+                                      "type": "raster",
+                                      "tiles": ["https://tile.openstreetmap.org/{z}/{x}/{y}.png"],
+                                      "tileSize": 256
+                                    }
+                                  },
+                                  "layers": [{
+                                    "id": "osm",
+                                    "type": "raster",
+                                    "source": "osm"
+                                  }]
+                                }
+                                """.trimIndent()
+                            }
+
+                            map.setStyle(Style.Builder().fromJson(styleJson)) { _ ->
+                                styleLoaded = true
+                                enableLocationComponent(map, context)
+                            }
+
+                            // Restore saved camera position
+                            if (savedLat != null && savedLon != null) {
+                                map.moveCamera(
+                                    CameraUpdateFactory.newLatLngZoom(
+                                        LatLng(savedLat!!, savedLon!!), savedZoom
+                                    )
+                                )
+                            }
+
+                            // Save camera on every move
+                            map.addOnCameraMoveListener {
+                                map.cameraPosition.target?.let { target ->
+                                    savedLat = target.latitude
+                                    savedLon = target.longitude
+                                    savedZoom = map.cameraPosition.zoom
+                                }
+                            }
+
+                            // Click listener for DELETE mode
+                            map.addOnMapClickListener { latLng ->
+                                when (interactionMode) {
+                                    MapInteractionMode.DELETE_ZONE -> {
+                                        val zone = zoneViewModel.getZoneAtPoint(
+                                            latLng.latitude, latLng.longitude
+                                        )
+                                        if (zone != null) {
+                                            zoneToDelete = zone
+                                            showDeleteConfirm = true
+                                        }
+                                        true
+                                    }
+                                    else -> false
+                                }
+                            }
+
+                            // Zone touch handler
+                            val handler = ZoneTouchHandler(
+                                mapView = this,
+                                map = map,
+                                onDrawing = { lat, lon, radius ->
+                                    isDrawingZone = true
+                                    MapLibreHelper.drawPreviewZone(map, lat, lon, radius)
+                                },
+                                onZoneReady = { lat, lon, radius ->
+                                    MapLibreHelper.clearPreviewZone(map)
+                                    isDrawingZone = false
+                                    pendingZoneCenter = LatLng(lat, lon)
+                                    pendingZoneRadius = radius
+                                    showColorPicker = true
+                                },
+                                onCancelled = {
+                                    MapLibreHelper.clearPreviewZone(map)
+                                    isDrawingZone = false
+                                }
+                            )
+                            zoneTouchHandler = handler
                         }
 
-                        map.setStyle(Style.Builder().fromJson(styleJson)) { _ ->
-                            // Style loaded successfully
+                        // Touch interceptor for DRAW mode
+                        setOnTouchListener { _, event ->
+                            if (interactionMode == MapInteractionMode.DRAW_ZONE) {
+                                zoneTouchHandler?.onTouch(event) ?: false
+                            } else {
+                                false
+                            }
                         }
                     }
+                },
+                modifier = Modifier.fillMaxSize()
+            )
+
+            // ── Bottom Right: Zoom + Location buttons ──
+            Column(
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                FloatingActionButton(
+                    onClick = { mapLibreMap?.animateCamera(CameraUpdateFactory.zoomIn()) },
+                    shape = CircleShape,
+                    containerColor = Color.White
+                ) {
+                    Text("+", fontSize = 24.sp, color = Color(0xFF1E88E5))
                 }
-            },
-            modifier = modifier,
-        )
+
+                FloatingActionButton(
+                    onClick = { mapLibreMap?.animateCamera(CameraUpdateFactory.zoomOut()) },
+                    shape = CircleShape,
+                    containerColor = Color.White
+                ) {
+                    Text("−", fontSize = 24.sp, color = Color(0xFF1E88E5))
+                }
+
+                FloatingActionButton(
+                    onClick = {
+                        mapLibreMap?.locationComponent?.lastKnownLocation?.let { loc ->
+                            mapLibreMap?.animateCamera(
+                                CameraUpdateFactory.newLatLngZoom(
+                                    LatLng(loc.latitude, loc.longitude), 15.0
+                                )
+                            )
+                            savedLat = loc.latitude
+                            savedLon = loc.longitude
+                            savedZoom = 15.0
+                        }
+                    },
+                    shape = CircleShape,
+                    containerColor = Color.White
+                ) {
+                    Icon(
+                        imageVector = MeshtasticIcons.MyLocation,
+                        contentDescription = "My Location",
+                        tint = Color(0xFF1E88E5)
+                    )
+                }
+            }
+
+            // ── Bottom Left: Zone buttons ──
+            Column(
+                modifier = Modifier
+                    .align(Alignment.BottomStart)
+                    .padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                FloatingActionButton(
+                    onClick = {
+                        interactionMode =
+                            if (interactionMode == MapInteractionMode.DELETE_ZONE)
+                                MapInteractionMode.NONE
+                            else MapInteractionMode.DELETE_ZONE
+                    },
+                    shape = CircleShape,
+                    containerColor = if (interactionMode == MapInteractionMode.DELETE_ZONE)
+                        Color(0xFFE53935) else Color.White
+                ) {
+                    Text("🗑", fontSize = 20.sp)
+                }
+
+                FloatingActionButton(
+                    onClick = {
+                        interactionMode =
+                            if (interactionMode == MapInteractionMode.DRAW_ZONE)
+                                MapInteractionMode.NONE
+                            else MapInteractionMode.DRAW_ZONE
+                    },
+                    shape = CircleShape,
+                    containerColor = if (interactionMode == MapInteractionMode.DRAW_ZONE)
+                        Color(0xFF43A047) else Color.White
+                ) {
+                    Text(
+                        "⬤",
+                        fontSize = 20.sp,
+                        color = if (interactionMode == MapInteractionMode.DRAW_ZONE)
+                            Color.White else Color(0xFF43A047)
+                    )
+                }
+            }
+
+            // ── Mode indicator banner ──
+            if (interactionMode != MapInteractionMode.NONE) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .padding(top = 72.dp)
+                        .background(
+                            color = if (interactionMode == MapInteractionMode.DRAW_ZONE)
+                                Color(0xFF43A047) else Color(0xFFE53935),
+                            shape = androidx.compose.foundation.shape.RoundedCornerShape(20.dp)
+                        )
+                        .padding(horizontal = 16.dp, vertical = 6.dp)
+                ) {
+                    Text(
+                        text = if (interactionMode == MapInteractionMode.DRAW_ZONE)
+                            "Press and drag to draw zone"
+                        else "Tap a zone to delete it",
+                        color = Color.White,
+                        fontSize = 13.sp
+                    )
+                }
+            }
+        }
+
+        // ── Color Picker Dialog ──
+        if (showColorPicker) {
+            AlertDialog(
+                onDismissRequest = { showColorPicker = false },
+                title = { Text("Choose Zone Color") },
+                text = {
+                    Row(
+                        horizontalArrangement = Arrangement.SpaceEvenly,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        ZoneColor.entries.forEach { color ->
+                            val bgColor = when (color) {
+                                ZoneColor.RED -> Color(0xFFE53935)
+                                ZoneColor.YELLOW -> Color(0xFFFDD835)
+                                ZoneColor.GREEN -> Color(0xFF43A047)
+                            }
+                            Button(
+                                onClick = {
+                                    pendingZoneCenter?.let { center ->
+                                        zoneViewModel.addZone(
+                                            MapZone(
+                                                centerLat = center.latitude,
+                                                centerLon = center.longitude,
+                                                radiusMeters = pendingZoneRadius,
+                                                color = color
+                                            )
+                                        )
+                                    }
+                                    showColorPicker = false
+                                    interactionMode = MapInteractionMode.NONE
+                                },
+                                colors = ButtonDefaults.buttonColors(containerColor = bgColor)
+                            ) {
+                                Text(color.name, color = Color.White)
+                            }
+                        }
+                    }
+                },
+                confirmButton = {},
+                dismissButton = {
+                    TextButton(onClick = { showColorPicker = false }) { Text("Cancel") }
+                }
+            )
+        }
+
+        // ── Delete Confirmation Dialog ──
+        if (showDeleteConfirm) {
+            AlertDialog(
+                onDismissRequest = { showDeleteConfirm = false },
+                title = { Text("Delete Zone?") },
+                text = { Text("Are you sure you want to delete this zone?") },
+                confirmButton = {
+                    Button(
+                        onClick = {
+                            zoneToDelete?.let { zoneViewModel.deleteZone(it.id) }
+                            showDeleteConfirm = false
+                            zoneToDelete = null
+                            interactionMode = MapInteractionMode.NONE
+                        },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = Color(0xFFE53935)
+                        )
+                    ) { Text("Delete") }
+                },
+                dismissButton = {
+                    TextButton(onClick = {
+                        showDeleteConfirm = false
+                        zoneToDelete = null
+                    }) { Text("Cancel") }
+                }
+            )
+        }
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun enableLocationComponent(map: MapLibreMap, context: android.content.Context) {
+        val style = map.style ?: return
+        try {
+            val locationComponent = map.locationComponent
+            val options = LocationComponentActivationOptions
+                .builder(context, style)
+                .useDefaultLocationEngine(true)
+                .build()
+            locationComponent.activateLocationComponent(options)
+            locationComponent.isLocationComponentEnabled = true
+            locationComponent.cameraMode = CameraMode.NONE
+            locationComponent.renderMode = RenderMode.COMPASS
+        } catch (e: Exception) {
+            android.util.Log.e("MapLibre", "Location component error: ${e.message}")
+        }
     }
 }
