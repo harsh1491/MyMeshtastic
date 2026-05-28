@@ -146,4 +146,12 @@ class CorePrefsAndroidModule {
             scope = CoroutineScope(dispatchers.io + SupervisorJob()),
             produceFile = { context.preferencesDataStoreFile("filter_ds") },
         )
+
+    @Single
+    @Named("BattlefieldDataStore")
+    fun provideBattlefieldDataStore(context: Context, dispatchers: CoroutineDispatchers): DataStore<Preferences> =
+        PreferenceDataStoreFactory.create(
+            scope = CoroutineScope(dispatchers.io + SupervisorJob()),
+            produceFile = { context.preferencesDataStoreFile("battlefield_ds") },
+        )
 }

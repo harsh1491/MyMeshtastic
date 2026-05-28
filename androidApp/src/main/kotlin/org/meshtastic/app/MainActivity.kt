@@ -90,6 +90,16 @@ import org.meshtastic.feature.map.node.NodeMapViewModel
 import org.meshtastic.feature.node.metrics.MetricsViewModel
 import org.meshtastic.feature.node.metrics.TracerouteMapScreen
 
+
+import org.koin.android.ext.android.inject
+import org.meshtastic.app.battlefield.BattlefieldViewModel
+import org.meshtastic.core.repository.NodeRepository
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.launch
+
+import kotlinx.coroutines.delay
+
+
 class MainActivity : AppCompatActivity() {
     private val model: UIViewModel by viewModel()
 
@@ -106,6 +116,17 @@ class MainActivity : AppCompatActivity() {
 
         // Eagerly evaluate lazy Koin dependency so it registers its LifecycleObserver
         meshServiceClient.hashCode()
+
+        // Set myNodeId in BattlefieldViewModel so it can send LoRa messages
+        val battlefieldVm: BattlefieldViewModel by inject()
+        val nodeRepository: NodeRepository by inject()
+        lifecycleScope.launch {
+            delay(2000)
+            val myId = nodeRepository.myId.value ?: ""
+            if (myId.isNotEmpty()) {
+                battlefieldVm.resetToSoldierOnLaunch(myId)
+            }
+        }
 
         super.onCreate(savedInstanceState)
 
@@ -292,6 +313,16 @@ class MainActivity : AppCompatActivity() {
             else -> {
                 Logger.w { "Unexpected action $appLinkAction" }
             }
+        }
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        val battlefieldVm: BattlefieldViewModel by inject()
+        val nodeRepository: NodeRepository by inject()
+        val myId = nodeRepository.myId.value ?: ""
+        if (myId.isNotEmpty()) {
+            battlefieldVm.resetToSoldierOnClose(myId)
         }
     }
 

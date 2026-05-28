@@ -11,6 +11,9 @@ import org.maplibre.geojson.Point
 import kotlin.math.PI
 import kotlin.math.cos
 
+import org.meshtastic.app.battlefield.UnitType
+import org.meshtastic.app.battlefield.loadBitmapWithoutBlackBackground
+
 object MapLibreHelper {
 
     // Node annotations list — persists across calls
@@ -144,23 +147,80 @@ object MapLibreHelper {
     }
 
     // Uses MapLibre Annotations API — always renders on top
-    fun updateNodeMarkers(map: MapLibreMap, nodes: List<NodeMarkerData>) {
-        // Remove old markers
+    fun updateNodeMarkers(
+        map: MapLibreMap,
+        nodes: List<NodeMarkerData>,
+        context: android.content.Context,
+        myNodeId: String = "",
+        getUnitType: (String) -> UnitType = { UnitType.SOLDIER }
+    ) {
         nodeAnnotations.forEach { map.removeMarker(it) }
         nodeAnnotations.clear()
 
-        // Add new markers
         nodes.forEach { node ->
-            val marker = map.addMarker(
-                org.maplibre.android.annotations.MarkerOptions()
-                    .position(org.maplibre.android.geometry.LatLng(node.lat, node.lon))
-                    .title(node.shortName)
-                    .snippet("Node: ${node.id}")
-            )
+            val unitType = getUnitType(node.id)
+            val isMyNode = node.id == myNodeId
+            val bitmap = loadUnitBitmap(context, unitType.drawableName, isMyNode)
+
+            val markerOptions = org.maplibre.android.annotations.MarkerOptions()
+                .position(org.maplibre.android.geometry.LatLng(node.lat, node.lon))
+                .title(node.shortName)
+                .snippet("Node: ${node.id}")
+
+            if (bitmap != null) {
+                val icon = org.maplibre.android.annotations.IconFactory
+                    .getInstance(context)
+                    .fromBitmap(bitmap)
+                markerOptions.icon(icon)
+            }
+
+            val marker = map.addMarker(markerOptions)
             if (marker != null) nodeAnnotations.add(marker)
         }
 
         android.util.Log.d("MarkerDebug", "Added ${nodeAnnotations.size} annotation markers")
+    }
+
+    private fun loadUnitBitmap(
+        context: android.content.Context,
+        drawableName: String,
+        isMyNode: Boolean
+    ): android.graphics.Bitmap? {
+        return try {
+            val resId = context.resources.getIdentifier(
+                drawableName, "drawable", context.packageName
+            )
+            if (resId == 0) return null
+
+            val original = android.graphics.BitmapFactory.decodeResource(
+                context.resources, resId
+            ) ?: return null
+
+            // Just resize — no background removal, images already have transparency
+            val scaled = android.graphics.Bitmap.createScaledBitmap(original, 120, 120, true)
+
+            if (isMyNode) {
+                // Add military green circle behind own marker
+                val size = 140
+                val bordered = android.graphics.Bitmap.createBitmap(
+                    size, size, android.graphics.Bitmap.Config.ARGB_8888
+                )
+                val canvas = android.graphics.Canvas(bordered)
+                val paint = android.graphics.Paint().apply {
+                    color = android.graphics.Color.parseColor("#4CAF50")
+                    style = android.graphics.Paint.Style.FILL
+                    isAntiAlias = true
+                }
+                canvas.drawCircle(70f, 70f, 70f, paint)
+                canvas.drawBitmap(scaled, 10f, 10f, null)
+                bordered
+            } else {
+                scaled
+            }
+        } catch (e: Exception) {
+            android.util.Log.e("MapLibreHelper", "Failed to load: $drawableName", e)
+            null
+        }
     }
 
     fun drawPreviewZone(map: MapLibreMap, centerLat: Double, centerLon: Double, radiusMeters: Double) {

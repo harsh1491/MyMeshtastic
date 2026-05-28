@@ -53,6 +53,9 @@ import org.meshtastic.core.ui.icon.MyLocation
 import org.meshtastic.core.ui.util.MapViewProvider
 import java.io.File
 
+import android.location.LocationManager
+import android.content.Context
+
 enum class MapInteractionMode { NONE, DRAW_ZONE, DELETE_ZONE }
 
 @Single
@@ -73,7 +76,7 @@ class FdroidMapViewProvider : MapViewProvider {
         MapLibre.getInstance(context)
 
         // ── Persistent state (survives page switches) ──
-        var savedZoom by rememberSaveable { mutableStateOf(15.0) }
+        var savedZoom by rememberSaveable { mutableStateOf(17.0) }
         var savedLat by rememberSaveable { mutableStateOf<Double?>(null) }
         var savedLon by rememberSaveable { mutableStateOf<Double?>(null) }
         var hasMovedToLocation by rememberSaveable { mutableStateOf(false) }
@@ -101,27 +104,82 @@ class FdroidMapViewProvider : MapViewProvider {
         }
 
         // ── Update node markers ──
-        LaunchedEffect(nodes, styleLoaded, mapLibreMap) {
+        val battlefieldVm: org.meshtastic.app.battlefield.BattlefieldViewModel =
+            remember { org.koin.core.context.GlobalContext.get().get() }
+        val nodeUnitTypes by battlefieldVm.nodeUnitTypes.collectAsStateWithLifecycle()
+        val myUnitType by battlefieldVm.unitType.collectAsStateWithLifecycle()
+
+        LaunchedEffect(nodes, styleLoaded, mapLibreMap, nodeUnitTypes, myUnitType) {
             if (!styleLoaded) return@LaunchedEffect
             val map = mapLibreMap ?: return@LaunchedEffect
 
             kotlinx.coroutines.delay(300)
 
-            val markerData = nodes.filter { it.validPosition != null }.map { node ->
-                NodeMarkerData(
-                    id = node.num.toString(),
-                    lat = node.latitude,
-                    lon = node.longitude,
-                    shortName = node.user.short_name ?: "?"
+            val myNodeNum = mapViewModel.myNodeInfo.value?.myNodeNum
+
+            if (myNodeNum != null) {
+                battlefieldVm.setMyNodeId(myNodeNum.toString())
+            }
+
+            val markerData = mutableListOf<NodeMarkerData>()
+
+            // Add other nodes that have LoRa GPS
+            nodes.filter { it.validPosition != null && it.num != myNodeNum }.forEach { node ->
+                markerData.add(
+                    NodeMarkerData(
+                        id = node.num.toString(),
+                        lat = node.latitude,
+                        lon = node.longitude,
+                        shortName = node.user.short_name ?: "?"
+                    )
                 )
             }
 
-            android.util.Log.d("MarkerDebug", "Updating ${markerData.size} markers")
-            markerData.forEach {
-                android.util.Log.d("MarkerDebug", "  → ${it.shortName} at ${it.lat}, ${it.lon}")
+            // Add MY node — LoRa GPS first, phone GPS fallback
+            if (myNodeNum != null) {
+                val myNode = nodes.firstOrNull { it.num == myNodeNum }
+                val myLoraLocation = if (myNode?.validPosition != null) {
+                    Pair(myNode.latitude, myNode.longitude)
+                } else null
+
+                val myPhoneLocation = getPhoneLocation(context)
+
+                when {
+                    myLoraLocation != null -> {
+                        android.util.Log.d("MarkerFix", "MY MARKER: Using LoRa GPS → ${myLoraLocation.first}, ${myLoraLocation.second}")
+                        markerData.add(
+                            NodeMarkerData(
+                                id = myNodeNum.toString(),
+                                lat = myLoraLocation.first,
+                                lon = myLoraLocation.second,
+                                shortName = myNode?.user?.short_name ?: "Me"
+                            )
+                        )
+                    }
+                    myPhoneLocation != null -> {
+                        android.util.Log.d("MarkerFix", "MY MARKER: Using Phone GPS → ${myPhoneLocation.latitude}, ${myPhoneLocation.longitude}")
+                        markerData.add(
+                            NodeMarkerData(
+                                id = myNodeNum.toString(),
+                                lat = myPhoneLocation.latitude,
+                                lon = myPhoneLocation.longitude,
+                                shortName = myNode?.user?.short_name ?: "Me"
+                            )
+                        )
+                    }
+                    else -> {
+                        android.util.Log.d("MarkerFix", "MY MARKER: No GPS available — marker not shown")
+                    }
+                }
             }
 
-            MapLibreHelper.updateNodeMarkers(map, markerData)
+            MapLibreHelper.updateNodeMarkers(
+                map = map,
+                nodes = markerData,
+                context = context,
+                myNodeId = myNodeNum?.toString() ?: "",
+                getUnitType = { nodeId -> battlefieldVm.getUnitTypeForNode(nodeId) }
+            )
         }
 
         // ── Auto move to my location once ──
@@ -130,16 +188,23 @@ class FdroidMapViewProvider : MapViewProvider {
                 val map = mapLibreMap ?: return@LaunchedEffect
                 // Wait a moment for location component to get a fix
                 kotlinx.coroutines.delay(1000)
-                val loc = map.locationComponent.lastKnownLocation
+
+                // THIS MUST BE HERE — sets myNodeId in BattlefieldViewModel
+                val myNodeNum = mapViewModel.myNodeInfo.value?.myNodeNum
+                if (myNodeNum != null) {
+                    battlefieldVm.setMyNodeId(myNodeNum.toString())
+                }
+
+                val loc = getPhoneLocation(context)
                 if (loc != null) {
                     map.moveCamera(
                         CameraUpdateFactory.newLatLngZoom(
-                            LatLng(loc.latitude, loc.longitude), 15.0
+                            LatLng(loc.latitude, loc.longitude), 17.0
                         )
                     )
                     savedLat = loc.latitude
                     savedLon = loc.longitude
-                    savedZoom = 15.0
+                    savedZoom = 17.0
                     hasMovedToLocation = true
                 } else {
                     val lat = savedLat ?: 20.5937
@@ -338,15 +403,33 @@ class FdroidMapViewProvider : MapViewProvider {
 
                 FloatingActionButton(
                     onClick = {
-                        mapLibreMap?.locationComponent?.lastKnownLocation?.let { loc ->
-                            mapLibreMap?.animateCamera(
+                        val map = mapLibreMap ?: return@FloatingActionButton
+                        val myNodeNum = mapViewModel.myNodeInfo.value?.myNodeNum
+                        val myNode = mapViewModel.nodes.value.firstOrNull { it.num == myNodeNum }
+
+                        val lat: Double?
+                        val lon: Double?
+
+                        if (myNode?.validPosition != null) {
+                            // Use LoRa GPS
+                            lat = myNode.latitude
+                            lon = myNode.longitude
+                        } else {
+                            // Use phone GPS
+                            val loc = getPhoneLocation(context)
+                            lat = loc?.latitude
+                            lon = loc?.longitude
+                        }
+
+                        if (lat != null && lon != null) {
+                            map.animateCamera(
                                 CameraUpdateFactory.newLatLngZoom(
-                                    LatLng(loc.latitude, loc.longitude), 15.0
+                                    LatLng(lat, lon), 17.0
                                 )
                             )
-                            savedLat = loc.latitude
-                            savedLon = loc.longitude
-                            savedZoom = 15.0
+                            savedLat = lat
+                            savedLon = lon
+                            savedZoom = 17.0
                         }
                     },
                     shape = CircleShape,
@@ -506,6 +589,8 @@ class FdroidMapViewProvider : MapViewProvider {
 
     @SuppressLint("MissingPermission")
     private fun enableLocationComponent(map: MapLibreMap, context: android.content.Context) {
+        // We draw our own location marker, so we disable the built-in dot
+        // but still enable the engine to get GPS coordinates
         val style = map.style ?: return
         try {
             val locationComponent = map.locationComponent
@@ -514,11 +599,34 @@ class FdroidMapViewProvider : MapViewProvider {
                 .useDefaultLocationEngine(true)
                 .build()
             locationComponent.activateLocationComponent(options)
-            locationComponent.isLocationComponentEnabled = true
+            locationComponent.isLocationComponentEnabled = false // ← disabled visually
             locationComponent.cameraMode = CameraMode.NONE
-            locationComponent.renderMode = RenderMode.COMPASS
+            locationComponent.renderMode = RenderMode.NORMAL
         } catch (e: Exception) {
             android.util.Log.e("MapLibre", "Location component error: ${e.message}")
         }
     }
+
+
+    @SuppressLint("MissingPermission")
+    private fun getPhoneLocation(context: android.content.Context): android.location.Location? {
+        return try {
+            val locationManager = context.getSystemService(Context.LOCATION_SERVICE) as LocationManager
+            val providers = locationManager.getProviders(true)
+            var bestLocation: android.location.Location? = null
+            for (provider in providers) {
+                val loc = locationManager.getLastKnownLocation(provider) ?: continue
+                if (bestLocation == null || loc.accuracy < bestLocation.accuracy) {
+                    bestLocation = loc
+                }
+            }
+            bestLocation
+        } catch (e: Exception) {
+            android.util.Log.e("MarkerFix", "Failed to get phone location: ${e.message}")
+            null
+        }
+    }
+
+
+
 }

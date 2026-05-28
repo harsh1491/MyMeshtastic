@@ -1,19 +1,3 @@
-/*
- * Copyright (c) 2026 Meshtastic LLC
- *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <https://www.gnu.org/licenses/>.
- */
 package org.meshtastic.feature.settings
 
 import android.app.Activity
@@ -37,12 +21,14 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.eygraber.uri.toKmpUri
 import org.jetbrains.compose.resources.stringResource
+import org.koin.compose.koinInject
 import org.meshtastic.core.common.util.nowMillis
 import org.meshtastic.core.common.util.toDate
 import org.meshtastic.core.common.util.toInstant
 import org.meshtastic.core.navigation.Route
 import org.meshtastic.core.navigation.SettingsRoute
 import org.meshtastic.core.navigation.WifiProvisionRoute
+import org.meshtastic.core.prefs.BattlefieldPrefs
 import org.meshtastic.core.resources.Res
 import org.meshtastic.core.resources.bottom_nav_settings
 import org.meshtastic.core.resources.export_configuration
@@ -93,6 +79,9 @@ fun SettingsScreen(
     val destNode by viewModel.destNode.collectAsStateWithLifecycle()
     val state by viewModel.radioConfigState.collectAsStateWithLifecycle()
 
+    // ── Battlefield Config ──
+
+
     var deviceProfile by remember { mutableStateOf<DeviceProfile?>(null) }
     var showEditDeviceProfileDialog by remember { mutableStateOf(false) }
 
@@ -116,11 +105,11 @@ fun SettingsScreen(
     if (showEditDeviceProfileDialog) {
         EditDeviceProfileDialog(
             title =
-            if (deviceProfile != null) {
-                stringResource(Res.string.import_configuration)
-            } else {
-                stringResource(Res.string.export_configuration)
-            },
+                if (deviceProfile != null) {
+                    stringResource(Res.string.import_configuration)
+                } else {
+                    stringResource(Res.string.export_configuration)
+                },
             deviceProfile = deviceProfile ?: viewModel.currentDeviceProfile,
             onConfirm = {
                 showEditDeviceProfileDialog = false
@@ -166,17 +155,16 @@ fun SettingsScreen(
 
     Scaffold(
         topBar = {
-            // Show back arrow when remotely administering (caller supplies onBack and we're not on the local node).
             val showBack = onBack != null && !state.isLocal
             MainAppBar(
                 title = stringResource(Res.string.bottom_nav_settings),
                 subtitle =
-                if (state.isLocal) {
-                    ourNode?.user?.long_name
-                } else {
-                    val remoteName = destNode?.user?.long_name ?: ""
-                    stringResource(Res.string.remotely_administrating, remoteName)
-                },
+                    if (state.isLocal) {
+                        ourNode?.user?.long_name
+                    } else {
+                        val remoteName = destNode?.user?.long_name ?: ""
+                        stringResource(Res.string.remotely_administrating, remoteName)
+                    },
                 ourNode = ourNode,
                 showNodeChip = ourNode != null && isConnected && state.isLocal,
                 canNavigateUp = showBack,
@@ -187,9 +175,23 @@ fun SettingsScreen(
         },
     ) { paddingValues ->
         Column(
-            modifier = Modifier.verticalScroll(rememberScrollState()).padding(paddingValues).padding(16.dp),
+            modifier = Modifier
+                .verticalScroll(rememberScrollState())
+                .padding(paddingValues)
+                .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
+            // ── BATTLEFIELD CONFIG — always first ──
+            ExpressiveSection(title = "Battlefield Config") {
+                ListItem(
+                    text = "Battlefield Config",
+                    leadingIcon = null,
+                    trailingIcon = null,
+                ) {
+                    onNavigate(SettingsRoute.BattlefieldConfig)
+                }
+            }
+
             RadioConfigItemList(
                 state = state,
                 isManaged = localConfig.security?.is_managed ?: false,
@@ -221,7 +223,6 @@ fun SettingsScreen(
                 onNavigate = onNavigate,
             )
 
-            // App-local settings are only relevant when configuring the local node
             if (state.isLocal) {
                 PrivacySection(
                     analyticsAvailable = state.analyticsAvailable,
@@ -241,7 +242,10 @@ fun SettingsScreen(
                 )
 
                 ExpressiveSection(title = stringResource(Res.string.wifi_devices)) {
-                    ListItem(text = stringResource(Res.string.wifi_devices), leadingIcon = MeshtasticIcons.Wifi) {
+                    ListItem(
+                        text = stringResource(Res.string.wifi_devices),
+                        leadingIcon = MeshtasticIcons.Wifi
+                    ) {
                         onNavigate(WifiProvisionRoute.WifiProvision())
                     }
                 }

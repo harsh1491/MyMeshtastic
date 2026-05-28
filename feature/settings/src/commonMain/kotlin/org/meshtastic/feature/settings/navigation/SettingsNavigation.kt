@@ -72,6 +72,8 @@ import org.meshtastic.feature.settings.radio.component.TrafficManagementConfigSc
 import org.meshtastic.feature.settings.radio.component.UserConfigScreen
 import kotlin.reflect.KClass
 
+
+
 @Composable
 fun getRadioConfigViewModel(backStack: NavBackStack<NavKey>, destNumOverride: Int? = null): RadioConfigViewModel {
     val destNum =
@@ -244,6 +246,10 @@ fun EntryProviderScope<NavKey>.settingsGraph(backStack: NavBackStack<NavKey>) {
         val viewModel: FilterSettingsViewModel = koinViewModel()
         FilterSettingsScreen(viewModel = viewModel, onBack = dropUnlessResumed { backStack.removeLastOrNull() })
     }
+
+    battlefieldConfigEntry(backStack)
+
+
 }
 
 /** Expect declaration for the platform-specific settings main screen. */
@@ -264,3 +270,5 @@ fun <R : Route> EntryProviderScope<NavKey>.configComposable(
 ) {
     addEntryProvider(route) { content(getRadioConfigViewModel(backStack)) }
 }
+
+expect fun EntryProviderScope<NavKey>.battlefieldConfigEntry(backStack: NavBackStack<NavKey>)

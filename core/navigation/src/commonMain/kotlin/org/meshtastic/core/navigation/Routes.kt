@@ -87,7 +87,7 @@ sealed interface SettingsRoute : Route {
     @Serializable data class Settings(val destNum: Int? = null) :
         SettingsRoute,
         Graph
-
+    @Serializable data object BattlefieldConfig : SettingsRoute
     @Serializable data object DeviceConfiguration : SettingsRoute
 
     @Serializable data object ModuleConfiguration : SettingsRoute

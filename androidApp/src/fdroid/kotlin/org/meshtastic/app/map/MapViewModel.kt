@@ -4,9 +4,7 @@ import androidx.lifecycle.SavedStateHandle
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.flow.onEach
 import org.koin.core.annotation.KoinViewModel
 import org.meshtastic.core.common.BuildConfigProvider
 import org.meshtastic.core.common.util.ioDispatcher
@@ -20,8 +18,8 @@ import org.meshtastic.core.ui.viewmodel.safeLaunch
 import org.meshtastic.core.ui.viewmodel.stateInWhileSubscribed
 import org.meshtastic.feature.map.BaseMapViewModel
 import org.meshtastic.proto.LocalConfig
-
-import androidx.lifecycle.viewModelScope
+import org.meshtastic.app.battlefield.BattlefieldViewModel
+import org.meshtastic.app.battlefield.UnitType
 
 @Suppress("LongParameterList")
 @KoinViewModel
@@ -33,10 +31,13 @@ class MapViewModel(
     radioConfigRepository: RadioConfigRepository,
     buildConfigProvider: BuildConfigProvider,
     savedStateHandle: SavedStateHandle,
-//    val zoneViewModel: ZoneViewModel,
 ) : BaseMapViewModel(mapPrefs, nodeRepository, packetRepository, radioController) {
 
     private val zoneViewModel: ZoneViewModel by lazy {
+        org.koin.core.context.GlobalContext.get().get()
+    }
+
+    private val battlefieldViewModel: BattlefieldViewModel by lazy {
         org.koin.core.context.GlobalContext.get().get()
     }
 
@@ -60,12 +61,8 @@ class MapViewModel(
 
     val applicationId = buildConfigProvider.applicationId
 
-    // ── Zone message format ──
-    // Add:    Z:LAT,LON,RADIUS,COLOR_INITIAL  e.g. Z:17.3094,78.4967,500,R
-    // Delete: ZX:LAT,LON                      e.g. ZX:17.3094,78.4967
-
     fun sendZone(zone: MapZone) {
-        val colorChar = zone.color.name[0] // R, Y, or G
+        val colorChar = zone.color.name[0]
         val lat = "%.6f".format(zone.centerLat)
         val lon = "%.6f".format(zone.centerLon)
         val radius = zone.radiusMeters.toInt()
@@ -83,28 +80,35 @@ class MapViewModel(
     }
 
     private fun sendRawMessage(text: String) {
-        safeLaunch(context = ioDispatcher, tag = "sendZoneMessage") {
+        safeLaunch(context = ioDispatcher, tag = "sendRawMessage") {
             val p = DataPacket(DataPacket.ID_BROADCAST, 0, text)
             radioController.sendMessage(p)
         }
     }
 
-    // ── Listen for incoming zone messages ──
     init {
-        safeLaunch(context = ioDispatcher, tag = "zoneMessageListener") {
+        safeLaunch(context = ioDispatcher, tag = "meshMessageListener") {
             packetRepository.getContacts()
                 .map { contacts ->
                     contacts.values.filter { packet ->
                         val text = packet.text ?: return@filter false
-                        text.startsWith("Z:") || text.startsWith("ZX:")
+                        text.startsWith("Z:") || text.startsWith("ZX:") || text.startsWith("UT:")
                     }
                 }
-                .collect { zonePackets ->
-                    zonePackets.forEach { packet ->
+                .collect { packets ->
+                    packets.forEach { packet ->
                         val text = packet.text ?: return@forEach
                         if (packet.from == DataPacket.ID_LOCAL) return@forEach
-                        android.util.Log.d("ZoneSync", "Received zone message: $text")
-                        parseAndApplyZoneMessage(text)
+                        when {
+                            text.startsWith("Z:") || text.startsWith("ZX:") -> {
+                                android.util.Log.d("ZoneSync", "Received: $text")
+                                parseAndApplyZoneMessage(text)
+                            }
+                            text.startsWith("UT:") -> {
+                                android.util.Log.d("BattlefieldSync", "Received: $text")
+                                parseAndApplyUnitTypeMessage(text)
+                            }
+                        }
                     }
                 }
         }
@@ -114,7 +118,6 @@ class MapViewModel(
         try {
             when {
                 text.startsWith("Z:") -> {
-                    // Z:LAT,LON,RADIUS,COLOR
                     val parts = text.removePrefix("Z:").split(",")
                     if (parts.size < 4) return
                     val lat = parts[0].toDouble()
@@ -126,36 +129,22 @@ class MapViewModel(
                         "G" -> ZoneColor.GREEN
                         else -> ZoneColor.RED
                     }
-                    val zone = MapZone(
-                        centerLat = lat,
-                        centerLon = lon,
-                        radiusMeters = radius,
-                        color = color
-                    )
-                    // Check if zone already exists (avoid duplicates)
+                    val zone = MapZone(centerLat = lat, centerLon = lon, radiusMeters = radius, color = color)
                     val exists = zoneViewModel.zones.value.any { existing ->
-                        zoneViewModel.distanceMeters(
-                            existing.centerLat, existing.centerLon,
-                            lat, lon
-                        ) < 10.0
+                        zoneViewModel.distanceMeters(existing.centerLat, existing.centerLon, lat, lon) < 10.0
                     }
                     if (!exists) {
                         zoneViewModel.addZoneFromRemote(zone)
                         android.util.Log.d("ZoneSync", "Zone added from remote: $lat,$lon")
                     }
                 }
-
                 text.startsWith("ZX:") -> {
-                    // ZX:LAT,LON
                     val parts = text.removePrefix("ZX:").split(",")
                     if (parts.size < 2) return
                     val lat = parts[0].toDouble()
                     val lon = parts[1].toDouble()
                     val zoneToDelete = zoneViewModel.zones.value.firstOrNull { zone ->
-                        zoneViewModel.distanceMeters(
-                            zone.centerLat, zone.centerLon,
-                            lat, lon
-                        ) < 10.0
+                        zoneViewModel.distanceMeters(zone.centerLat, zone.centerLon, lat, lon) < 10.0
                     }
                     zoneToDelete?.let {
                         zoneViewModel.forceDeleteZone(it.id)
@@ -165,6 +154,19 @@ class MapViewModel(
             }
         } catch (e: Exception) {
             android.util.Log.e("ZoneSync", "Failed to parse zone message: $text", e)
+        }
+    }
+
+    private fun parseAndApplyUnitTypeMessage(text: String) {
+        try {
+            // UT:NODEID,S
+            val parts = text.removePrefix("UT:").split(",")
+            if (parts.size < 2) return
+            val nodeId = parts[0].trim()
+            val unitType = UnitType.fromCode(parts[1].trim().uppercase())
+            battlefieldViewModel.applyRemoteUnitType(nodeId, unitType)
+        } catch (e: Exception) {
+            android.util.Log.e("BattlefieldSync", "Failed to parse UT message: $text", e)
         }
     }
 }
