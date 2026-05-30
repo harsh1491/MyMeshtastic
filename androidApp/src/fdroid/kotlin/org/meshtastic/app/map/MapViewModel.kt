@@ -88,29 +88,21 @@ class MapViewModel(
 
     init {
         safeLaunch(context = ioDispatcher, tag = "meshMessageListener") {
-            packetRepository.getContacts()
-                .map { contacts ->
-                    contacts.values.filter { packet ->
-                        val text = packet.text ?: return@filter false
-                        text.startsWith("Z:") || text.startsWith("ZX:") || text.startsWith("UT:")
-                    }
+            val meshDataHandler: org.meshtastic.core.repository.MeshDataHandler =
+                org.koin.core.context.GlobalContext.get().get()
+
+            meshDataHandler.battlefieldMessages.collect { dataPacket ->
+                val text = dataPacket.text ?: return@collect
+                // Skip our own outgoing messages
+                if (dataPacket.from == DataPacket.ID_LOCAL) return@collect
+                android.util.Log.d("ZoneSync", "Battlefield message received: $text")
+                when {
+                    text.startsWith("Z:") || text.startsWith("ZX:") ->
+                        parseAndApplyZoneMessage(text)
+                    text.startsWith("UT:") ->
+                        parseAndApplyUnitTypeMessage(text)
                 }
-                .collect { packets ->
-                    packets.forEach { packet ->
-                        val text = packet.text ?: return@forEach
-                        if (packet.from == DataPacket.ID_LOCAL) return@forEach
-                        when {
-                            text.startsWith("Z:") || text.startsWith("ZX:") -> {
-                                android.util.Log.d("ZoneSync", "Received: $text")
-                                parseAndApplyZoneMessage(text)
-                            }
-                            text.startsWith("UT:") -> {
-                                android.util.Log.d("BattlefieldSync", "Received: $text")
-                                parseAndApplyUnitTypeMessage(text)
-                            }
-                        }
-                    }
-                }
+            }
         }
     }
 

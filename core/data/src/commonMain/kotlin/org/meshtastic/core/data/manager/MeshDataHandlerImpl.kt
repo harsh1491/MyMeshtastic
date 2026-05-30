@@ -68,6 +68,9 @@ import org.meshtastic.proto.StatusMessage
 import org.meshtastic.proto.User
 import org.meshtastic.proto.Waypoint
 
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.SharedFlow
+
 /**
  * Implementation of [MeshDataHandler] that decodes and routes incoming mesh data packets.
  *
@@ -106,6 +109,11 @@ class MeshDataHandlerImpl(
             PortNum.WAYPOINT_APP.value,
             PortNum.NODE_STATUS_APP.value,
         )
+
+    private val _battlefieldMessages = MutableSharedFlow<DataPacket>(
+        extraBufferCapacity = 64
+    )
+    override val battlefieldMessages: SharedFlow<DataPacket> = _battlefieldMessages
 
     override fun handleReceivedData(packet: MeshPacket, myNodeNum: Int, logUuid: String?, logInsertJob: Job?) {
         val dataPacket = dataMapper.toDataPacket(packet) ?: return
@@ -248,6 +256,12 @@ class MeshDataHandlerImpl(
         if (decoded.reply_id != 0 && decoded.emoji != 0) {
             rememberReaction(packet)
         } else {
+            // Intercept battlefield messages — emit to flow, skip database
+            val text = dataPacket.text.orEmpty()
+            if (text.startsWith("Z:") || text.startsWith("ZX:") || text.startsWith("UT:")) {
+                scope.launch { _battlefieldMessages.emit(dataPacket) }
+                return  // do NOT save to database, do NOT show in chat
+            }
             rememberDataPacket(dataPacket, myNodeNum)
         }
     }
@@ -357,6 +371,7 @@ class MeshDataHandlerImpl(
                 // Check if message should be filtered
                 val isFiltered = shouldFilterMessage(dataPacket, contactKey)
 
+
                 insert(
                     dataPacket,
                     myNodeNum,
@@ -378,8 +393,14 @@ class MeshDataHandlerImpl(
         if (isIgnored) return true
 
         if (dataPacket.dataType != PortNum.TEXT_MESSAGE_APP.value) return false
+
+        // Safety net — battlefield messages should already be intercepted in handleTextMessage
+        // but filter them here too just in case
+        val text = dataPacket.text.orEmpty()
+        if (text.startsWith("Z:") || text.startsWith("ZX:") || text.startsWith("UT:")) return true
+
         val isFilteringDisabled = getContactSettings(contactKey).filteringDisabled
-        return messageFilter.shouldFilter(dataPacket.text.orEmpty(), isFilteringDisabled)
+        return messageFilter.shouldFilter(text, isFilteringDisabled)
     }
 
     private suspend fun handlePacketNotification(

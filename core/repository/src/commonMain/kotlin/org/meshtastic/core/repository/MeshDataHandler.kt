@@ -20,6 +20,8 @@ import kotlinx.coroutines.Job
 import org.meshtastic.core.model.DataPacket
 import org.meshtastic.proto.MeshPacket
 
+import kotlinx.coroutines.flow.SharedFlow
+
 /** Interface for handling incoming mesh data packets and routing them to the appropriate handlers. */
 interface MeshDataHandler {
     /**
@@ -40,4 +42,9 @@ interface MeshDataHandler {
      * @param updateNotification Whether to trigger a notification for this packet.
      */
     fun rememberDataPacket(dataPacket: DataPacket, myNodeNum: Int, updateNotification: Boolean = true)
+
+    // Emits battlefield messages (Z:, ZX:, UT:) directly without database storage
+    val battlefieldMessages: SharedFlow<DataPacket>
+
+
 }
