@@ -57,6 +57,9 @@ import org.meshtastic.feature.settings.di.FeatureSettingsModule
 import org.meshtastic.feature.widget.di.FeatureWidgetModule
 import org.meshtastic.feature.wifiprovision.di.FeatureWifiProvisionModule
 
+import org.meshtastic.app.EmergencyWipeManager
+import org.meshtastic.feature.settings.EmergencyWipeHandler
+
 @Module(
     includes =
     [
@@ -119,4 +122,8 @@ class AppKoinModule {
     @Single fun provideProbeTable(provider: ProbeTableProvider): ProbeTable = provider.get()
 
     @Single fun provideUsbSerialProber(probeTable: ProbeTable): UsbSerialProber = UsbSerialProber(probeTable)
+
+    @Single
+    fun provideEmergencyWipeManager(application: Application): EmergencyWipeHandler =
+        EmergencyWipeManager(application)
 }

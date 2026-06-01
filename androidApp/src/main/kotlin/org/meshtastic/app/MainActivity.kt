@@ -112,6 +112,15 @@ class MainActivity : AppCompatActivity() {
     internal val meshServiceClient: MeshServiceClient by inject { parametersOf(this) }
 
     override fun onCreate(savedInstanceState: Bundle?) {
+
+        // Emergency wipe check — must be first
+        if (EmergencyWipeManager.isWiped(this)) {
+            finish()
+            android.os.Process.killProcess(android.os.Process.myPid())
+            return
+        }
+
+
         installSplashScreen()
 
         // Eagerly evaluate lazy Koin dependency so it registers its LifecycleObserver

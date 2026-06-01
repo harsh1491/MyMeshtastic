@@ -62,6 +62,8 @@ import org.meshtastic.proto.DeviceProfile
 import java.text.SimpleDateFormat
 import java.util.Locale
 
+import org.meshtastic.feature.settings.EmergencyWipeSection
+
 @Suppress("LongMethod", "CyclomaticComplexMethod")
 @Composable
 fun SettingsScreen(
@@ -283,6 +285,8 @@ fun SettingsScreen(
                     onNavigate(SettingsRoute.HelpDocs)
                 }
             }
+            // ── Emergency Data Wipe — always last ──
+            EmergencyWipeSection()
         }
     }
 }
