@@ -136,40 +136,37 @@ class FdroidMapViewProvider : MapViewProvider {
             }
 
             // Add MY node — LoRa GPS first, phone GPS fallback
+            // Add MY node — LoRa GPS first, phone GPS fallback with retry
+            // Add MY node — LoRa GPS first, then active phone GPS request
             if (myNodeNum != null) {
                 val myNode = nodes.firstOrNull { it.num == myNodeNum }
                 val myLoraLocation = if (myNode?.validPosition != null) {
                     Pair(myNode.latitude, myNode.longitude)
                 } else null
 
-                val myPhoneLocation = getPhoneLocation(context)
+                val lat: Double?
+                val lon: Double?
 
-                when {
-                    myLoraLocation != null -> {
-                        android.util.Log.d("MarkerFix", "MY MARKER: Using LoRa GPS → ${myLoraLocation.first}, ${myLoraLocation.second}")
-                        markerData.add(
-                            NodeMarkerData(
-                                id = myNodeNum.toString(),
-                                lat = myLoraLocation.first,
-                                lon = myLoraLocation.second,
-                                shortName = myNode?.user?.short_name ?: "Me"
-                            )
-                        )
-                    }
-                    myPhoneLocation != null -> {
-                        android.util.Log.d("MarkerFix", "MY MARKER: Using Phone GPS → ${myPhoneLocation.latitude}, ${myPhoneLocation.longitude}")
-                        markerData.add(
-                            NodeMarkerData(
-                                id = myNodeNum.toString(),
-                                lat = myPhoneLocation.latitude,
-                                lon = myPhoneLocation.longitude,
-                                shortName = myNode?.user?.short_name ?: "Me"
-                            )
-                        )
-                    }
-                    else -> {
-                        android.util.Log.d("MarkerFix", "MY MARKER: No GPS available — marker not shown")
-                    }
+                if (myLoraLocation != null) {
+                    lat = myLoraLocation.first
+                    lon = myLoraLocation.second
+                    android.util.Log.d("MarkerFix", "MY MARKER: Using LoRa GPS")
+                } else {
+                    // Try cached first, then actively request fresh location
+                    val cached = getPhoneLocation(context)
+                    val location = cached ?: requestFreshLocation(context)
+                    lat = location?.latitude
+                    lon = location?.longitude
+                    android.util.Log.d("MarkerFix", "MY MARKER: ${if (location != null) "Using Phone GPS ${lat},${lon}" else "No GPS"}")
+                }
+
+                if (lat != null && lon != null) {
+                    markerData.add(NodeMarkerData(
+                        id = myNodeNum.toString(),
+                        lat = lat,
+                        lon = lon,
+                        shortName = myNode?.user?.short_name ?: "Me"
+                    ))
                 }
             }
 
@@ -180,6 +177,91 @@ class FdroidMapViewProvider : MapViewProvider {
                 myNodeId = myNodeNum?.toString() ?: "",
                 getUnitType = { nodeId -> battlefieldVm.getUnitTypeForNode(nodeId) }
             )
+        }
+
+        // One-time GPS acquisition on first load
+        LaunchedEffect(styleLoaded) {
+            if (!styleLoaded) return@LaunchedEffect
+
+            // Try cached location first for immediate marker
+            val cachedLoc = getPhoneLocation(context)
+            val myNodeNum = mapViewModel.myNodeInfo.value?.myNodeNum
+
+            if (cachedLoc != null && myNodeNum != null) {
+                val map = mapLibreMap ?: return@LaunchedEffect
+                val currentNodes = mapViewModel.nodes.value
+                val markerData = mutableListOf<NodeMarkerData>()
+
+                currentNodes.filter { it.validPosition != null && it.num != myNodeNum }
+                    .forEach { node ->
+                        markerData.add(NodeMarkerData(
+                            id = node.num.toString(),
+                            lat = node.latitude,
+                            lon = node.longitude,
+                            shortName = node.user.short_name ?: "?"
+                        ))
+                    }
+
+                val myNode = currentNodes.firstOrNull { it.num == myNodeNum }
+                val myLat = myNode?.takeIf { it.validPosition != null }?.latitude ?: cachedLoc.latitude
+                val myLon = myNode?.takeIf { it.validPosition != null }?.longitude ?: cachedLoc.longitude
+
+                markerData.add(NodeMarkerData(
+                    id = myNodeNum.toString(),
+                    lat = myLat,
+                    lon = myLon,
+                    shortName = myNode?.user?.short_name ?: "Me"
+                ))
+
+                battlefieldVm.setMyNodeId(myNodeNum.toString())
+                MapLibreHelper.updateNodeMarkers(
+                    map = map,
+                    nodes = markerData,
+                    context = context,
+                    myNodeId = myNodeNum.toString(),
+                    getUnitType = { nodeId -> battlefieldVm.getUnitTypeForNode(nodeId) }
+                )
+            }
+
+            // Then try fresh GPS and update again
+            kotlinx.coroutines.delay(500)
+            val freshLoc = requestFreshLocation(context)
+            if (freshLoc != null && myNodeNum != null) {
+                val map = mapLibreMap ?: return@LaunchedEffect
+                val currentNodes = mapViewModel.nodes.value
+                val markerData = mutableListOf<NodeMarkerData>()
+
+                currentNodes.filter { it.validPosition != null && it.num != myNodeNum }
+                    .forEach { node ->
+                        markerData.add(NodeMarkerData(
+                            id = node.num.toString(),
+                            lat = node.latitude,
+                            lon = node.longitude,
+                            shortName = node.user.short_name ?: "?"
+                        ))
+                    }
+
+                val myNode = currentNodes.firstOrNull { it.num == myNodeNum }
+                val myLat = myNode?.takeIf { it.validPosition != null }?.latitude ?: freshLoc.latitude
+                val myLon = myNode?.takeIf { it.validPosition != null }?.longitude ?: freshLoc.longitude
+
+                markerData.add(NodeMarkerData(
+                    id = myNodeNum.toString(),
+                    lat = myLat,
+                    lon = myLon,
+                    shortName = myNode?.user?.short_name ?: "Me"
+                ))
+
+                battlefieldVm.setMyNodeId(myNodeNum.toString())
+                MapLibreHelper.updateNodeMarkers(
+                    map = map,
+                    nodes = markerData,
+                    context = context,
+                    myNodeId = myNodeNum.toString(),
+                    getUnitType = { nodeId -> battlefieldVm.getUnitTypeForNode(nodeId) }
+                )
+                android.util.Log.d("MarkerFix", "Fresh GPS marker placed: ${freshLoc.latitude}, ${freshLoc.longitude}")
+            }
         }
 
         // ── Auto move to my location once ──
@@ -611,9 +693,13 @@ class FdroidMapViewProvider : MapViewProvider {
     @SuppressLint("MissingPermission")
     private fun getPhoneLocation(context: android.content.Context): android.location.Location? {
         return try {
-            val locationManager = context.getSystemService(Context.LOCATION_SERVICE) as LocationManager
+            val locationManager = context.getSystemService(
+                android.content.Context.LOCATION_SERVICE
+            ) as android.location.LocationManager
+
             val providers = locationManager.getProviders(true)
             var bestLocation: android.location.Location? = null
+
             for (provider in providers) {
                 val loc = locationManager.getLastKnownLocation(provider) ?: continue
                 if (bestLocation == null || loc.accuracy < bestLocation.accuracy) {
@@ -621,9 +707,64 @@ class FdroidMapViewProvider : MapViewProvider {
                 }
             }
             bestLocation
+        } catch (e: Exception) { null }
+    }
+
+
+    @SuppressLint("MissingPermission")
+    private suspend fun requestFreshLocation(context: android.content.Context): android.location.Location? {
+        return try {
+            val locationManager = context.getSystemService(
+                android.content.Context.LOCATION_SERVICE
+            ) as android.location.LocationManager
+
+            val providers = listOf(
+                android.location.LocationManager.GPS_PROVIDER,
+                android.location.LocationManager.NETWORK_PROVIDER,
+                android.location.LocationManager.FUSED_PROVIDER
+            ).filter {
+                try { locationManager.isProviderEnabled(it) } catch (_: Exception) { false }
+            }
+
+            if (providers.isEmpty()) return getPhoneLocation(context)
+
+            kotlinx.coroutines.withTimeoutOrNull(10000) {
+                kotlinx.coroutines.suspendCancellableCoroutine { cont ->
+                    val listener = object : android.location.LocationListener {
+                        override fun onLocationChanged(location: android.location.Location) {
+                            if (cont.isActive) cont.resumeWith(Result.success(location))
+                            try { locationManager.removeUpdates(this) } catch (_: Exception) {}
+                        }
+                        override fun onProviderDisabled(provider: String) {}
+                        override fun onProviderEnabled(provider: String) {}
+                    }
+
+                    var registered = false
+                    for (provider in providers) {
+                        try {
+                            locationManager.requestLocationUpdates(
+                                provider, 0L, 0f, listener,
+                                android.os.Looper.getMainLooper()
+                            )
+                            registered = true
+                            break
+                        } catch (_: Exception) {}
+                    }
+
+                    if (!registered) {
+                        cont.resumeWith(Result.success(null))
+                        return@suspendCancellableCoroutine
+                    }
+
+                    cont.invokeOnCancellation {
+                        try { locationManager.removeUpdates(listener) } catch (_: Exception) {}
+                    }
+                }
+            } ?: getPhoneLocation(context) // fallback to cached if timeout
+
         } catch (e: Exception) {
-            android.util.Log.e("MarkerFix", "Failed to get phone location: ${e.message}")
-            null
+            android.util.Log.e("MarkerFix", "requestFreshLocation error: ${e.message}")
+            getPhoneLocation(context)
         }
     }
 
