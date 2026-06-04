@@ -53,6 +53,10 @@ import org.meshtastic.core.ui.icon.MyLocation
 import org.meshtastic.core.ui.util.MapViewProvider
 import java.io.File
 
+import androidx.compose.foundation.layout.size
+
+import androidx.compose.material3.OutlinedTextField
+
 import android.location.LocationManager
 import android.content.Context
 
@@ -92,6 +96,11 @@ class FdroidMapViewProvider : MapViewProvider {
         var styleLoaded by remember { mutableStateOf(false) }
         var isDrawingZone by remember { mutableStateOf(false) }
         var zoneTouchHandler by remember { mutableStateOf<ZoneTouchHandler?>(null) }
+
+        // Add these for the Quick Message feature:
+        var selectedRemoteNodeId by remember { mutableStateOf<String?>(null) }
+        var selectedRemoteNodeName by remember { mutableStateOf("") }
+        var quickMessageText by remember { mutableStateOf("") }
 
         val zones by zoneViewModel.zones.collectAsStateWithLifecycle()
         val nodes by mapViewModel.nodes.collectAsStateWithLifecycle()
@@ -393,6 +402,24 @@ class FdroidMapViewProvider : MapViewProvider {
                                 }
                             }
 
+                            // NEW: Marker Click Listener for Quick Messaging
+                            map.setOnMarkerClickListener { marker ->
+                                // Extract the Node ID from the snippet (we set it as "Node: 8d34")
+                                val nodeId = marker.snippet?.replace("Node: ", "") ?: return@setOnMarkerClickListener false
+                                val myNodeNum = mapViewModel.myNodeInfo.value?.myNodeNum?.toString()
+
+                                if (nodeId != myNodeNum) {
+                                    // It's a remote node. Trigger our Compose popup!
+                                    selectedRemoteNodeId = nodeId
+                                    selectedRemoteNodeName = marker.title ?: "Unknown Unit"
+                                    quickMessageText = "" // Clear previous text
+                                    true // Return true to consume the click (hides default map tooltip)
+                                } else {
+                                    // It's MY node. Return false to let the default behavior happen.
+                                    false
+                                }
+                            }
+
                             // Click listener for DELETE mode
                             map.addOnMapClickListener { latLng ->
                                 when (interactionMode) {
@@ -667,6 +694,170 @@ class FdroidMapViewProvider : MapViewProvider {
                 }
             )
         }
+
+        // ── Tactical Quick Message Dialog ──
+        if (selectedRemoteNodeId != null) {
+            androidx.compose.ui.window.Dialog(onDismissRequest = { selectedRemoteNodeId = null }) {
+                androidx.compose.material3.Surface(
+                    shape = androidx.compose.foundation.shape.RoundedCornerShape(4.dp), // Sharper, rugged corners
+                    color = Color(0xFF121A16), // Pitch dark tactical green/grey
+                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF4CAF50)), // Terminal green border
+                    tonalElevation = 8.dp
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .padding(16.dp)
+                            .fillMaxWidth(),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        // Title
+                        Text(
+                            text = "COMMS LINK: $selectedRemoteNodeName",
+                            fontWeight = androidx.compose.ui.text.font.FontWeight.Bold,
+                            fontSize = 16.sp,
+                            color = Color(0xFF4CAF50), // Terminal Green
+                            letterSpacing = 1.sp
+                        )
+
+                        // Thin separator line
+                        androidx.compose.material3.HorizontalDivider(
+                            color = Color(0xFF2E4035),
+                            thickness = 1.dp
+                        )
+
+                        // ── Pre-typed Battlefield Messages (2x2 Grid) ──
+                        Text(
+                            text = "QUICK TRANSMIT:",
+                            fontSize = 12.sp,
+                            fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold,
+                            color = Color(0xFFA0B2A6), // Muted grey-green
+                            letterSpacing = 0.5.sp
+                        )
+
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            // Top Row: Urgent & Clear
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                                Button(
+                                    onClick = {
+                                        mapViewModel.sendDirectMessage(selectedRemoteNodeId!!, "Need Assistance!")
+                                        selectedRemoteNodeId = null
+                                    },
+                                    modifier = Modifier.weight(1f),
+                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF8B0000)), // Dark Blood Red
+                                    shape = androidx.compose.foundation.shape.RoundedCornerShape(2.dp),
+                                    contentPadding = androidx.compose.foundation.layout.PaddingValues(4.dp)
+                                ) {
+                                    Text("NEED ASSIST", fontSize = 11.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold, maxLines = 1)
+                                }
+
+                                Button(
+                                    onClick = {
+                                        mapViewModel.sendDirectMessage(selectedRemoteNodeId!!, "Area Clear.")
+                                        selectedRemoteNodeId = null
+                                    },
+                                    modifier = Modifier.weight(1f),
+                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1B5E20)), // Deep Jungle Green
+                                    shape = androidx.compose.foundation.shape.RoundedCornerShape(2.dp),
+                                    contentPadding = androidx.compose.foundation.layout.PaddingValues(4.dp)
+                                ) {
+                                    Text("AREA CLEAR", fontSize = 11.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold, maxLines = 1)
+                                }
+                            }
+
+                            // Bottom Row: Movement & Warning
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                                Button(
+                                    onClick = {
+                                        mapViewModel.sendDirectMessage(selectedRemoteNodeId!!, "Moving to Position.")
+                                        selectedRemoteNodeId = null
+                                    },
+                                    modifier = Modifier.weight(1f),
+                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF37474F)), // Dark Gunmetal
+                                    shape = androidx.compose.foundation.shape.RoundedCornerShape(2.dp),
+                                    contentPadding = androidx.compose.foundation.layout.PaddingValues(4.dp)
+                                ) {
+                                    Text("MOVING TO POS", fontSize = 11.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold, maxLines = 1)
+                                }
+
+                                Button(
+                                    onClick = {
+                                        mapViewModel.sendDirectMessage(selectedRemoteNodeId!!, "Target Spotted!")
+                                        selectedRemoteNodeId = null
+                                    },
+                                    modifier = Modifier.weight(1f),
+                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFF57F17)), // Dark Amber
+                                    shape = androidx.compose.foundation.shape.RoundedCornerShape(2.dp),
+                                    contentPadding = androidx.compose.foundation.layout.PaddingValues(4.dp)
+                                ) {
+                                    Text("TARGET SPOTTED", fontSize = 11.sp, color = Color.Black, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold, maxLines = 1)
+                                }
+                            }
+                        }
+
+                        // ── Custom Message Text Box ──
+                        Text(
+                            text = "CUSTOM TRANSMISSION:",
+                            fontSize = 12.sp,
+                            fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold,
+                            color = Color(0xFFA0B2A6),
+                            modifier = Modifier.padding(top = 4.dp),
+                            letterSpacing = 0.5.sp
+                        )
+
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            androidx.compose.material3.OutlinedTextField(
+                                value = quickMessageText,
+                                onValueChange = { quickMessageText = it },
+                                placeholder = { Text("Enter payload...", color = Color(0xFF5A7062)) },
+                                modifier = Modifier.weight(1f),
+                                singleLine = true,
+                                shape = androidx.compose.foundation.shape.RoundedCornerShape(2.dp),
+                                // This overrides the default light-mode colors for the text box
+                                colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(
+                                    focusedTextColor = Color(0xFFE0E0E0),
+                                    unfocusedTextColor = Color(0xFFE0E0E0),
+                                    focusedBorderColor = Color(0xFF4CAF50),
+                                    unfocusedBorderColor = Color(0xFF2E4035),
+                                    cursorColor = Color(0xFF4CAF50),
+                                    focusedContainerColor = Color(0xFF0A0F0D), // Almost pitch black
+                                    unfocusedContainerColor = Color(0xFF0A0F0D)
+                                )
+                            )
+
+                            // Tactical TX (Transmit) Button
+                            Button(
+                                onClick = {
+                                    if (quickMessageText.isNotBlank()) {
+                                        mapViewModel.sendDirectMessage(selectedRemoteNodeId!!, quickMessageText)
+                                        quickMessageText = ""
+                                        selectedRemoteNodeId = null
+                                    }
+                                },
+                                shape = androidx.compose.foundation.shape.RoundedCornerShape(2.dp),
+                                modifier = Modifier.size(52.dp),
+                                contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF4CAF50))
+                            ) {
+                                Text("SEND", color = Color.Black, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold, fontSize = 16.sp)
+                            }
+                        }
+
+                        // Bottom right abort button
+                        TextButton(
+                            onClick = { selectedRemoteNodeId = null },
+                            modifier = Modifier.align(Alignment.End)
+                        ) {
+                            Text("ABORT", color = Color(0xFFE53935), fontWeight = androidx.compose.ui.text.font.FontWeight.Bold)
+                        }
+                    }
+                }
+            }
+        }
+
+
     }
 
     @SuppressLint("MissingPermission")

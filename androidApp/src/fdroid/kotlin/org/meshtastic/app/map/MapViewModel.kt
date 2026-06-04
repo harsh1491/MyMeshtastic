@@ -106,6 +106,30 @@ class MapViewModel(
         }
     }
 
+    // Add this INSIDE MapViewModel class (alongside your sendZone functions)
+    fun sendDirectMessage(targetNodeId: String, text: String) {
+        safeLaunch(context = ioDispatcher, tag = "sendDirectMessage") {
+            // Convert the decimal string (e.g., "12345678") back to a number
+            val num = targetNodeId.toLongOrNull()
+            if (num == null) {
+                android.util.Log.e("MapViewModel", "Failed to send DM: Invalid node ID '$targetNodeId'")
+                return@safeLaunch
+            }
+
+            // Format the number into the standard Meshtastic Hex ID (e.g., "!00bc614e")
+            val hexDestId = String.format("!%08x", num)
+            android.util.Log.d("MapViewModel", "Sending quick DM to $hexDestId: $text")
+
+            // Create and send the packet using the properly formatted destination
+            val p = org.meshtastic.core.model.DataPacket(
+                to = hexDestId,
+                channel = 0,
+                text = text
+            )
+            radioController.sendMessage(p)
+        }
+    }
+
     private fun parseAndApplyZoneMessage(text: String) {
         try {
             when {
