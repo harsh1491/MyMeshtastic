@@ -488,12 +488,15 @@ class FdroidMapViewProvider : MapViewProvider {
             )
 
             // ── Bottom Right: Zoom + Location buttons ──
+            // ── Bottom Right: Zoom + Location buttons ──
             Column(
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
                     .padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+                horizontalAlignment = Alignment.End // Ensures + and - stay aligned to the far right edge
             ) {
+                // Zoom In
                 FloatingActionButton(
                     onClick = { mapLibreMap?.animateCamera(CameraUpdateFactory.zoomIn()) },
                     shape = CircleShape,
@@ -502,6 +505,7 @@ class FdroidMapViewProvider : MapViewProvider {
                     Text("+", fontSize = 24.sp, color = Color(0xFF1E88E5))
                 }
 
+                // Zoom Out
                 FloatingActionButton(
                     onClick = { mapLibreMap?.animateCamera(CameraUpdateFactory.zoomOut()) },
                     shape = CircleShape,
@@ -510,45 +514,59 @@ class FdroidMapViewProvider : MapViewProvider {
                     Text("−", fontSize = 24.sp, color = Color(0xFF1E88E5))
                 }
 
-                FloatingActionButton(
-                    onClick = {
-                        val map = mapLibreMap ?: return@FloatingActionButton
-                        val myNodeNum = mapViewModel.myNodeInfo.value?.myNodeNum
-                        val myNode = mapViewModel.nodes.value.firstOrNull { it.num == myNodeNum }
-
-                        val lat: Double?
-                        val lon: Double?
-
-                        if (myNode?.validPosition != null) {
-                            // Use LoRa GPS
-                            lat = myNode.latitude
-                            lon = myNode.longitude
-                        } else {
-                            // Use phone GPS
-                            val loc = getPhoneLocation(context)
-                            lat = loc?.latitude
-                            lon = loc?.longitude
-                        }
-
-                        if (lat != null && lon != null) {
-                            map.animateCamera(
-                                CameraUpdateFactory.newLatLngZoom(
-                                    LatLng(lat, lon), 17.0
-                                )
-                            )
-                            savedLat = lat
-                            savedLon = lon
-                            savedZoom = 17.0
-                        }
-                    },
-                    shape = CircleShape,
-                    containerColor = Color.White
+                // Row holding the Logo (Left) and Location Button (Right)
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(16.dp) // Space between logo and button
                 ) {
-                    Icon(
-                        imageVector = MeshtasticIcons.MyLocation,
-                        contentDescription = "My Location",
-                        tint = Color(0xFF1E88E5)
+                    // Company Logo
+                    androidx.compose.foundation.Image(
+                        painter = androidx.compose.ui.res.painterResource(
+                            id = org.meshtastic.app.R.drawable.company_logo // MAKE SURE THIS MATCHES YOUR FILENAME
+                        ),
+                        contentDescription = "Company Logo",
+                        modifier = Modifier.size(56.dp) // Adjust this size (e.g. 48.dp, 64.dp) to fit perfectly
                     )
+
+                    // My Location Button
+                    FloatingActionButton(
+                        onClick = {
+                            val map = mapLibreMap ?: return@FloatingActionButton
+                            val myNodeNum = mapViewModel.myNodeInfo.value?.myNodeNum
+                            val myNode = mapViewModel.nodes.value.firstOrNull { it.num == myNodeNum }
+
+                            val lat: Double?
+                            val lon: Double?
+
+                            if (myNode?.validPosition != null) {
+                                lat = myNode.latitude
+                                lon = myNode.longitude
+                            } else {
+                                val loc = getPhoneLocation(context)
+                                lat = loc?.latitude
+                                lon = loc?.longitude
+                            }
+
+                            if (lat != null && lon != null) {
+                                map.animateCamera(
+                                    CameraUpdateFactory.newLatLngZoom(
+                                        LatLng(lat, lon), 17.0
+                                    )
+                                )
+                                savedLat = lat
+                                savedLon = lon
+                                savedZoom = 17.0
+                            }
+                        },
+                        shape = CircleShape,
+                        containerColor = Color.White
+                    ) {
+                        Icon(
+                            imageVector = MeshtasticIcons.MyLocation,
+                            contentDescription = "My Location",
+                            tint = Color(0xFF1E88E5)
+                        )
+                    }
                 }
             }
 
