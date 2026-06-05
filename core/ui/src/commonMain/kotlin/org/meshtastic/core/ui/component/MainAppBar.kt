@@ -128,7 +128,11 @@ private fun EventAwareBranding() {
             },
         )
     } else {
-        Icon(imageVector = vectorResource(Res.drawable.ic_meshtastic), contentDescription = null)
+        Image(
+            painter = painterResource(Res.drawable.ic_meshtastic),
+            contentDescription = "Logo",
+            modifier = Modifier.size(32.dp).clip(CircleShape)
+        )
     }
 }
 
