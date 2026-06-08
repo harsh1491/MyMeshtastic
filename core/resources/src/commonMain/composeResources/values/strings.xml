@@ -104,7 +104,7 @@
     <string name="bluetooth_feature_config">Configuration</string>
     <string name="bluetooth_feature_config_description">Wirelessly manage your device settings and channels.</string>
     <string name="bluetooth_feature_discovery">Discovery</string>
-    <string name="bluetooth_feature_discovery_description">Find and identify Meshtastic devices near you.</string>
+    <string name="bluetooth_feature_discovery_description">Find and identify STAN devices near you.</string>
     <string name="bluetooth_permission">Bluetooth</string>
     <string name="bold_heading">Bold Heading</string>
     <string name="bottom_nav_settings">Settings</string>
@@ -279,10 +279,10 @@
     <string name="demo_mode">Demo Mode</string>
     <string name="desc_node_filter_clear">clear node filter</string>
     <string name="description">Description</string>
-    <string name="desktop_notification_title">Meshtastic</string>
+    <string name="desktop_notification_title">STAN</string>
     <string name="desktop_tray_quit">Quit</string>
-    <string name="desktop_tray_show">Show Meshtastic</string>
-    <string name="desktop_tray_tooltip">Meshtastic Desktop</string>
+    <string name="desktop_tray_show">Show STAN</string>
+    <string name="desktop_tray_tooltip">STAN Desktop</string>
     <string name="details">Details</string>
     <string name="detection_sensor">Detection Sensor</string>
     <string name="detection_sensor_config">Detection Sensor Config</string>
@@ -324,7 +324,7 @@
     <string name="distance_filters">Distance Filters</string>
     <string name="distance_filters_description">Filter the node list and mesh map based on proximity to your phone.</string>
     <string name="distance_measurements">Distance Measurements</string>
-    <string name="distance_measurements_description">Display the distance between your phone and other Meshtastic nodes with positions.</string>
+    <string name="distance_measurements_description">Display the distance between your phone and other STAN nodes with positions.</string>
     <string name="dns">DNS</string>
     <!-- DOC -->
     <string name="doc_clear_search">Clear search</string>
@@ -423,7 +423,7 @@
     <string name="external_notification_enabled">External notification enabled</string>
     <string name="factory_reset">Factory reset</string>
     <string name="fair">Fair</string>
-    <string name="fallback_node_name">Meshtastic %1$s</string>
+    <string name="fallback_node_name">STAN %1$s</string>
     <string name="favorite">Favorite</string>
     <string name="favorite_add">Add '%1$s' as a favorite node?</string>
     <string name="favorite_remove">Remove '%1$s' as a favorite node?</string>
@@ -623,7 +623,7 @@
     <string name="legacy_admin_channel">Legacy Admin channel</string>
     <string name="library_count">%1$d libraries</string>
     <string name="licensed_amateur_radio">Licensed amateur radio (Ham)</string>
-    <string name="licensed_amateur_radio_text">Enabling this option disables encryption and is not compatible with the default Meshtastic network.</string>
+    <string name="licensed_amateur_radio_text">Enabling this option disables encryption and is not compatible with the default STAN network.</string>
     <!-- LOAD -->
     <string name="load">Load</string>
     <string name="load_15_min">Load 15m</string>
@@ -679,7 +679,7 @@
     <string name="managed_mode">Managed Mode</string>
     <string name="manual_position_request">Manual position request required</string>
     <!-- MAP -->
-    <string name="map">Mesh Map</string>
+    <string name="map">Mesh Offline Map</string>
     <string name="map_cache_info">Cache Capacity: %1$d MB\nCache Usage: %2$d MB</string>
     <string name="map_cache_manager">Cache Manager</string>
     <string name="map_cache_size">Current Cache size</string>
@@ -716,9 +716,9 @@
     <string name="mesh_map_location">Mesh Map Location</string>
     <string name="mesh_map_location_description">Enables the blue location dot for your phone in the mesh map.</string>
     <!-- MESHTASTIC -->
-    <string name="meshtastic">Meshtastic</string>
+    <string name="meshtastic">STAN</string>
     <string name="meshtastic_alerts_notifications">Alert notifications</string>
-    <string name="meshtastic_app_name">Meshtastic</string>
+    <string name="meshtastic_app_name">STAN</string>
     <string name="meshtastic_broadcast_notifications">Broadcast message notifications</string>
     <string name="meshtastic_low_battery_notifications">Low battery notifications</string>
     <string name="meshtastic_low_battery_temporary_remote_notifications">Low battery notifications (favorite nodes)</string>
@@ -854,7 +854,7 @@
     <string name="not_connected">Not connected</string>
     <string name="note">Note</string>
     <string name="notes">Notes</string>
-    <string name="notification_permissions_description">Meshtastic uses notifications to keep you updated on new messages and other important events. You can update your notification permissions at any time from settings.</string>
+    <string name="notification_permissions_description">STAN uses notifications to keep you updated on new messages and other important events. You can update your notification permissions at any time from settings.</string>
     <!-- NOTIFICATIONS -->
     <string name="notifications_for_channel_and_direct_messages">Notifications for channel and direct messages.</string>
     <string name="notifications_for_low_battery_alerts">Notifications for low battery alerts for the connected device.</string>
@@ -877,7 +877,7 @@
     <string name="only_favorites">Only Favorites</string>
     <string name="open_compass">Open Compass</string>
     <string name="open_settings">Open settings</string>
-    <string name="open_source_description">Meshtastic is built with the following open source libraries. Tap any library to view its license.</string>
+    <string name="open_source_description">STAN is built with the following open source libraries. Tap any library to view its license.</string>
     <string name="open_source_libraries">Open Source Libraries</string>
     <string name="options">Options</string>
     <string name="orient_north">Orient north</string>
@@ -907,9 +907,9 @@
     <string name="paxcounter_config">Paxcounter Config</string>
     <string name="paxcounter_enabled">Paxcounter enabled</string>
     <string name="periodic_position_broadcast">Periodic position broadcast</string>
-    <string name="permission_missing_31">Meshtastic needs "Nearby devices" permissions enabled to find and connect to devices via Bluetooth. You can disable when not in use.</string>
+    <string name="permission_missing_31">STAN needs "Nearby devices" permissions enabled to find and connect to devices via Bluetooth. You can disable when not in use.</string>
     <string name="phone_location">Phone Location</string>
-    <string name="phone_location_description">Meshtastic uses your phone's location to enable a number of features. You can update your location permissions at any time from settings.</string>
+    <string name="phone_location_description">STAN uses your phone's location to enable a number of features. You can update your location permissions at any time from settings.</string>
     <string name="play">Play</string>
     <plurals name="plurals_hours">
         <item quantity="one">%1$d hour</item>
@@ -1191,7 +1191,7 @@
     <string name="success">Success</string>
     <string name="super_deep_sleep_duration_seconds">Super deep sleep duration</string>
     <string name="supported">Supported</string>
-    <string name="supported_by_community">Supported by Meshtastic Community</string>
+    <string name="supported_by_community">Supported by STAN</string>
     <string name="sx126x_rx_boosted_gain">RX Boosted Gain</string>
     <string name="system_settings">System Settings</string>
     <!-- TAK -->

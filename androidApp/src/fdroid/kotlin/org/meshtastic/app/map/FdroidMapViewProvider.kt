@@ -54,6 +54,7 @@ import org.meshtastic.core.ui.util.MapViewProvider
 import java.io.File
 
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.height
 
 import androidx.compose.material3.OutlinedTextField
 
@@ -525,7 +526,7 @@ class FdroidMapViewProvider : MapViewProvider {
                             id = org.meshtastic.app.R.drawable.company_logo // MAKE SURE THIS MATCHES YOUR FILENAME
                         ),
                         contentDescription = "Company Logo",
-                        modifier = Modifier.size(56.dp) // Adjust this size (e.g. 48.dp, 64.dp) to fit perfectly
+                        modifier = Modifier.height(56.dp) // Adjust this size (e.g. 48.dp, 64.dp) to fit perfectly
                     )
 
                     // My Location Button

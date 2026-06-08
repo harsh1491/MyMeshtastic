@@ -551,7 +551,7 @@
     <string name="managed_mode">Hanterat läge</string>
     <string name="manual_position_request">Manuell positionsbegäran krävs</string>
     <!-- MAP -->
-    <string name="map">Mesh Map</string>
+    <string name="map">Offline Mesh Map</string>
     <string name="map_cache_info">Cache-kapacitet: %1$d MB\nCache-användning: %2$d MB</string>
     <string name="map_cache_manager">Cache-hanterare</string>
     <string name="map_cache_size">Aktuell cachestorlek</string>
