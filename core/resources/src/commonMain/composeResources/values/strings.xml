@@ -679,7 +679,7 @@
     <string name="managed_mode">Managed Mode</string>
     <string name="manual_position_request">Manual position request required</string>
     <!-- MAP -->
-    <string name="map">Mesh Offline Map</string>
+    <string name="map">Defend Offline Map</string>
     <string name="map_cache_info">Cache Capacity: %1$d MB\nCache Usage: %2$d MB</string>
     <string name="map_cache_manager">Cache Manager</string>
     <string name="map_cache_size">Current Cache size</string>

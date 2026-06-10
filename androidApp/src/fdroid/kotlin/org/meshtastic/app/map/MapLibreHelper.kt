@@ -19,11 +19,29 @@ object MapLibreHelper {
     // Node annotations list — persists across calls
     private val nodeAnnotations = mutableListOf<org.maplibre.android.annotations.Marker>()
 
+    // Stores previous counts so we don't redraw and cause lag unless someone actually enters/leaves
+    private var lastZoneCounts = mapOf<String, Int>()
+    private val zoneCountMarkers = mutableListOf<org.maplibre.android.annotations.Marker>()
+
     fun metersToDegreesLon(meters: Double, lat: Double): Double =
         meters / (111320.0 * cos(lat * PI / 180.0))
 
     fun metersToDegreesLat(meters: Double): Double =
         meters / 110574.0
+
+    fun calculateDistance(lat1: Double, lon1: Double, lat2: Double, lon2: Double): Double {
+        val r = 6371e3 // Earth radius in meters
+        val phi1 = lat1 * PI / 180.0
+        val phi2 = lat2 * PI / 180.0
+        val dPhi = (lat2 - lat1) * PI / 180.0
+        val dLambda = (lon2 - lon1) * PI / 180.0
+
+        val a = Math.sin(dPhi / 2) * Math.sin(dPhi / 2) +
+                Math.cos(phi1) * Math.cos(phi2) *
+                Math.sin(dLambda / 2) * Math.sin(dLambda / 2)
+        val c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
+        return r * c
+    }
 
     fun circleToPolygonPoints(
         centerLat: Double,
@@ -62,88 +80,128 @@ object MapLibreHelper {
         val remoteLayerId = "zones-layer-remote"
         val remoteOutlineId = "zones-outline-remote"
 
-        // Remove all existing zone layers
-        try { style.removeLayer(localOutlineId) } catch (_: Exception) {}
-        try { style.removeLayer(localLayerId) } catch (_: Exception) {}
-        try { style.removeLayer(remoteOutlineId) } catch (_: Exception) {}
-        try { style.removeLayer(remoteLayerId) } catch (_: Exception) {}
-        try { style.removeSource(sourceId) } catch (_: Exception) {}
-
-        if (zones.isEmpty()) return
-
-        // Add isLocal as a property on each feature
         val features = zones.map { zone ->
             val feature = zoneToFeature(zone)
             feature.addBooleanProperty("isLocal", zone.isLocal)
             feature
         }
         val collection = FeatureCollection.fromFeatures(features)
+
+        // If the source already exists, just update the data smoothly without destroying layers!
+        val existingSource = style.getSource(sourceId) as? GeoJsonSource
+        if (existingSource != null) {
+            existingSource.setGeoJson(collection)
+            return
+        }
+
+        // Only runs the very first time to build the layers
         style.addSource(GeoJsonSource(sourceId, collection))
 
-        // ── Local zones — colored fill, thin colored outline ──
         val localFill = FillLayer(localLayerId, sourceId).apply {
-            setFilter(
-                org.maplibre.android.style.expressions.Expression.eq(
-                    org.maplibre.android.style.expressions.Expression.get("isLocal"),
-                    org.maplibre.android.style.expressions.Expression.literal(true)
-                )
-            )
+            setFilter(org.maplibre.android.style.expressions.Expression.eq(
+                org.maplibre.android.style.expressions.Expression.get("isLocal"),
+                org.maplibre.android.style.expressions.Expression.literal(true)
+            ))
             setProperties(
-                PropertyFactory.fillColor(
-                    org.maplibre.android.style.expressions.Expression.get("color")
-                ),
+                PropertyFactory.fillColor(org.maplibre.android.style.expressions.Expression.get("color")),
                 PropertyFactory.fillOpacity(0.35f)
             )
         }
         style.addLayer(localFill)
 
         val localOutline = LineLayer(localOutlineId, sourceId).apply {
-            setFilter(
-                org.maplibre.android.style.expressions.Expression.eq(
-                    org.maplibre.android.style.expressions.Expression.get("isLocal"),
-                    org.maplibre.android.style.expressions.Expression.literal(true)
-                )
-            )
+            setFilter(org.maplibre.android.style.expressions.Expression.eq(
+                org.maplibre.android.style.expressions.Expression.get("isLocal"),
+                org.maplibre.android.style.expressions.Expression.literal(true)
+            ))
             setProperties(
-                PropertyFactory.lineColor(
-                    org.maplibre.android.style.expressions.Expression.get("color")
-                ),
+                PropertyFactory.lineColor(org.maplibre.android.style.expressions.Expression.get("color")),
                 PropertyFactory.lineWidth(2f)
             )
         }
         style.addLayer(localOutline)
 
-        // ── Remote zones — same colored fill, BLUE outline ──
         val remoteFill = FillLayer(remoteLayerId, sourceId).apply {
-            setFilter(
-                org.maplibre.android.style.expressions.Expression.eq(
-                    org.maplibre.android.style.expressions.Expression.get("isLocal"),
-                    org.maplibre.android.style.expressions.Expression.literal(false)
-                )
-            )
+            setFilter(org.maplibre.android.style.expressions.Expression.eq(
+                org.maplibre.android.style.expressions.Expression.get("isLocal"),
+                org.maplibre.android.style.expressions.Expression.literal(false)
+            ))
             setProperties(
-                PropertyFactory.fillColor(
-                    org.maplibre.android.style.expressions.Expression.get("color")
-                ),
+                PropertyFactory.fillColor(org.maplibre.android.style.expressions.Expression.get("color")),
                 PropertyFactory.fillOpacity(0.35f)
             )
         }
         style.addLayer(remoteFill)
 
         val remoteOutline = LineLayer(remoteOutlineId, sourceId).apply {
-            setFilter(
-                org.maplibre.android.style.expressions.Expression.eq(
-                    org.maplibre.android.style.expressions.Expression.get("isLocal"),
-                    org.maplibre.android.style.expressions.Expression.literal(false)
-                )
-            )
+            setFilter(org.maplibre.android.style.expressions.Expression.eq(
+                org.maplibre.android.style.expressions.Expression.get("isLocal"),
+                org.maplibre.android.style.expressions.Expression.literal(false)
+            ))
             setProperties(
-                PropertyFactory.lineColor("#1565C0"),  // strong blue
-                PropertyFactory.lineWidth(3f),          // slightly thicker
-                PropertyFactory.lineDasharray(arrayOf(4f, 2f))  // dashed blue border
+                PropertyFactory.lineColor("#1565C0"),
+                PropertyFactory.lineWidth(3f),
+                PropertyFactory.lineDasharray(arrayOf(4f, 2f))
             )
         }
         style.addLayer(remoteOutline)
+    }
+
+    // Draws the text boxes natively so it works completely offline
+    fun updateZoneCountLabels(map: MapLibreMap, zones: List<MapZone>, nodeCounts: Map<String, Int>, context: android.content.Context) {
+        // Anti-lag: Only redraw if the counts actually changed or a zone was added/removed!
+        if (lastZoneCounts == nodeCounts && zoneCountMarkers.size == zones.size) return
+        lastZoneCounts = nodeCounts.toMap()
+
+        zoneCountMarkers.forEach { map.removeMarker(it) }
+        zoneCountMarkers.clear()
+
+        zones.forEach { zone ->
+            val count = nodeCounts[zone.id] ?: 0
+            val bitmap = createCountBitmap(count)
+            val icon = org.maplibre.android.annotations.IconFactory.getInstance(context).fromBitmap(bitmap)
+
+            val marker = map.addMarker(
+                org.maplibre.android.annotations.MarkerOptions()
+                    .position(org.maplibre.android.geometry.LatLng(zone.centerLat, zone.centerLon))
+                    .icon(icon)
+            )
+            if (marker != null) zoneCountMarkers.add(marker)
+        }
+    }
+
+    private fun createCountBitmap(count: Int): android.graphics.Bitmap {
+        val text = "$count UNITS"
+        val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+            color = android.graphics.Color.WHITE
+            textSize = 36f
+            typeface = android.graphics.Typeface.DEFAULT_BOLD
+            textAlign = android.graphics.Paint.Align.CENTER
+        }
+
+        val bounds = android.graphics.Rect()
+        paint.getTextBounds(text, 0, text.length, bounds)
+
+        val paddingX = 24
+        val paddingY = 16
+        val width = bounds.width() + paddingX * 2
+        val height = bounds.height() + paddingY * 2
+
+        val bitmap = android.graphics.Bitmap.createBitmap(width, height, android.graphics.Bitmap.Config.ARGB_8888)
+        val canvas = android.graphics.Canvas(bitmap)
+
+        // Tactical dark background box
+        val bgPaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+            color = android.graphics.Color.parseColor("#B3000000") // 70% opacity black
+            style = android.graphics.Paint.Style.FILL
+        }
+        val rect = android.graphics.RectF(0f, 0f, width.toFloat(), height.toFloat())
+        canvas.drawRoundRect(rect, 10f, 10f, bgPaint)
+
+        // Center the text vertically and horizontally inside the box
+        canvas.drawText(text, width / 2f, (height / 2f) + (bounds.height() / 2f) - 2f, paint)
+
+        return bitmap
     }
 
     // Uses MapLibre Annotations API — always renders on top

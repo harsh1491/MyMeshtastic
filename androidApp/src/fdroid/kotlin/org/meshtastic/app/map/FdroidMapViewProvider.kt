@@ -103,13 +103,80 @@ class FdroidMapViewProvider : MapViewProvider {
         var selectedRemoteNodeName by remember { mutableStateOf("") }
         var quickMessageText by remember { mutableStateOf("") }
 
+        // ── Memory for entry/exit detection ──
+        val previousZonePresence = remember { mutableMapOf<String, Set<String>>() }
+        var isFirstZoneCheck by remember { mutableStateOf(true) }
+
         val zones by zoneViewModel.zones.collectAsStateWithLifecycle()
         val nodes by mapViewModel.nodes.collectAsStateWithLifecycle()
 
         // ── Update zones ──
-        LaunchedEffect(zones, styleLoaded) {
+        // ── Update zones and dynamically count units inside them ──
+        // ── Update zones and dynamically count units inside them ──
+        // ── Update zones and dynamically track unit entries/exits ──
+        LaunchedEffect(zones, nodes, styleLoaded) {
             if (styleLoaded) {
-                mapLibreMap?.let { MapLibreHelper.updateZoneLayers(it, zones) }
+                val zoneCounts = mutableMapOf<String, Int>()
+                val validNodes = nodes.filter { it.validPosition != null }
+                val currentZonePresence = mutableMapOf<String, Set<String>>()
+
+                for (zone in zones) {
+                    val nodesInsideThisZone = mutableSetOf<String>()
+
+                    // 1. Find everyone currently inside the zone
+                    for (node in validNodes) {
+                        val distance = MapLibreHelper.calculateDistance(
+                            lat1 = zone.centerLat,
+                            lon1 = zone.centerLon,
+                            lat2 = node.latitude,
+                            lon2 = node.longitude
+                        )
+                        if (distance <= zone.radiusMeters) {
+                            val nodeName = node.user?.short_name ?: node.num.toString()
+                            nodesInsideThisZone.add(nodeName)
+                        }
+                    }
+
+                    currentZonePresence[zone.id] = nodesInsideThisZone
+                    zoneCounts[zone.id] = nodesInsideThisZone.size
+
+                    // 2. Compare with previous state to detect Entries and Exits
+                    // We only block notifications if it's the very first time the map loads.
+                    // If it's NOT the first load, we alert for any new zone captures!
+                    if (!isFirstZoneCheck) {
+                        // If it's a new zone, previousNodes is empty, so EVERYONE triggers an 'entered' alert.
+                        val previousNodes = previousZonePresence[zone.id] ?: emptySet()
+                        val entered = nodesInsideThisZone - previousNodes
+                        val exited = previousNodes - nodesInsideThisZone
+
+                        entered.forEach { nodeName ->
+                            android.widget.Toast.makeText(
+                                context,
+                                "⚠️ $nodeName ENTERED Zone",
+                                android.widget.Toast.LENGTH_SHORT
+                            ).show()
+                        }
+
+                        exited.forEach { nodeName ->
+                            android.widget.Toast.makeText(
+                                context,
+                                "ℹ️ $nodeName EXITED Zone",
+                                android.widget.Toast.LENGTH_SHORT
+                            ).show()
+                        }
+                    }
+                }
+
+                // 3. Update the memory and toggle the first-run flag
+                isFirstZoneCheck = false
+                previousZonePresence.clear()
+                previousZonePresence.putAll(currentZonePresence)
+
+                // 4. Draw the zones and the text boxes
+                mapLibreMap?.let { map ->
+                    MapLibreHelper.updateZoneLayers(map, zones)
+                    MapLibreHelper.updateZoneCountLabels(map, zones, zoneCounts, context)
+                }
             }
         }
 
