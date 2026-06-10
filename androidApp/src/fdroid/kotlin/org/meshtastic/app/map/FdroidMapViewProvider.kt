@@ -133,14 +133,28 @@ class FdroidMapViewProvider : MapViewProvider {
 
             val markerData = mutableListOf<NodeMarkerData>()
 
-            // Add other nodes that have LoRa GPS
-            nodes.filter { it.validPosition != null && it.num != myNodeNum }.forEach { node ->
+            // Define how long a node can be silent before it disappears (in seconds)
+            // 120 seconds = 2 minutes
+            val TIMEOUT_SECONDS = 120
+            val currentTimeSecs = System.currentTimeMillis() / 1000
+
+            // Filter for nodes with valid GPS, NOT our own node, AND heard from recently
+            nodes.filter { node ->
+                val hasPosition = node.validPosition != null
+                val isNotMe = node.num != myNodeNum
+
+                // Meshtastic stores lastHeard in seconds since epoch
+                val lastHeardSecs = node.lastHeard?.toLong() ?: 0L
+                val isOnline = (currentTimeSecs - lastHeardSecs) <= TIMEOUT_SECONDS
+
+                hasPosition && isNotMe && isOnline
+            }.forEach { node ->
                 markerData.add(
                     NodeMarkerData(
                         id = node.num.toString(),
                         lat = node.latitude,
                         lon = node.longitude,
-                        shortName = node.user.short_name ?: "?"
+                        shortName = node.user?.short_name ?: "?"
                     )
                 )
             }
