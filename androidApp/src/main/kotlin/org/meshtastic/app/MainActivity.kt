@@ -90,6 +90,17 @@ import org.meshtastic.feature.map.node.NodeMapViewModel
 import org.meshtastic.feature.node.metrics.MetricsViewModel
 import org.meshtastic.feature.node.metrics.TracerouteMapScreen
 
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Text
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.foundation.background
+
 
 import org.koin.android.ext.android.inject
 import org.meshtastic.app.battlefield.BattlefieldViewModel
@@ -153,40 +164,100 @@ class MainActivity : AppCompatActivity() {
         }
 
         setContent {
-            // Bridge Koin-provided ImageLoader (with flavor-specific HttpClient, SVG, debug logger)
-            // to Coil's singleton so all AsyncImage composables use the custom configuration.
+            // Bridge Koin-provided ImageLoader to Coil's singleton
             setSingletonImageLoaderFactory { get<ImageLoader>() }
 
-            val theme by model.theme.collectAsStateWithLifecycle()
-            val dynamic = theme == MODE_DYNAMIC
-            val dark =
-                when (theme) {
-                    AppCompatDelegate.MODE_NIGHT_YES -> true
-                    AppCompatDelegate.MODE_NIGHT_NO -> false
-                    else -> isSystemInDarkTheme()
+            // ── TIME-BOMB EXPIRATION CHECK ──
+            val expiryCalendar = java.util.Calendar.getInstance().apply {
+                // Year, Month (0-indexed: 5 = June), Day
+                set(2026, java.util.Calendar.JUNE, 14, 0, 0, 0)
+            }
+            val currentCalendar = java.util.Calendar.getInstance()
+            val isExpired = currentCalendar.after(expiryCalendar)
+
+            if (isExpired) {
+                // ── GRACEFUL LOCKOUT INTERFACE (Bypasses normal app initialization) ──
+                AppTheme(dynamicColor = false, darkTheme = true) {
+                    androidx.compose.foundation.layout.Box(
+                        modifier = androidx.compose.ui.Modifier
+                            .fillMaxSize()
+                            .background(androidx.compose.ui.graphics.Color(0xFF0A0F0D)), // Tactical pitch black
+                        contentAlignment = androidx.compose.ui.Alignment.Center
+                    ) {
+                        androidx.compose.foundation.layout.Column(
+                            horizontalAlignment = androidx.compose.ui.Alignment.CenterHorizontally,
+                            verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(16.dp),
+                            modifier = androidx.compose.ui.Modifier.padding(24.dp)
+                        ) {
+                            // Warn Icon / Header
+                            Text(
+                                text = "🛑 BUILD EXPIRED",
+                                color = androidx.compose.ui.graphics.Color(0xFFE53935), // Dark Alert Red
+                                fontWeight = androidx.compose.ui.text.font.FontWeight.Bold,
+                                fontSize = 22.sp,
+                                letterSpacing = 1.sp
+                            )
+
+                            // Explanation Text
+//                            Text(
+//                                text = "CRITICAL: This operational evaluation build expired on 14 June 2026.\n\nExecution privileges have been suspended. Please contact system administration for an updated deployment package.",
+//                                color = androidx.compose.ui.graphics.Color(0xFFA0B2A6), // Tactical gray-green text
+//                                fontSize = 14.sp,
+//                                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+//                                lineHeight = 20.sp
+//                            )
+
+                            androidx.compose.foundation.layout.Spacer(modifier = androidx.compose.ui.Modifier.height(16.dp))
+
+                            // Graceful Exit Controller
+                            Button(
+                                onClick = {
+                                    finish() // Gracefully closes the activity view wrapper without crashing
+                                },
+                                colors = ButtonDefaults.buttonColors(containerColor = androidx.compose.ui.graphics.Color(0xFF8B0000)), // Deep Blood Red
+                                shape = androidx.compose.foundation.shape.RoundedCornerShape(2.dp)
+                            ) {
+                                Text(
+                                    text = "OK",
+                                    color = androidx.compose.ui.graphics.Color.White,
+                                    fontWeight = androidx.compose.ui.text.font.FontWeight.Bold,
+                                    fontSize = 14.sp
+                                )
+                            }
+                        }
+                    }
+                }
+            } else {
+                // ── NORMAL APP RUNTIME (Runs perfectly if before June 14) ──
+                val theme by model.theme.collectAsStateWithLifecycle()
+                val dynamic = theme == MODE_DYNAMIC
+                val dark =
+                    when (theme) {
+                        AppCompatDelegate.MODE_NIGHT_YES -> true
+                        AppCompatDelegate.MODE_NIGHT_NO -> false
+                        else -> isSystemInDarkTheme()
+                    }
+
+                // Update system bar style when theme changes
+                androidx.compose.runtime.SideEffect {
+                    enableEdgeToEdge(
+                        statusBarStyle = SystemBarStyle.auto(Color.TRANSPARENT, Color.TRANSPARENT) { dark },
+                        navigationBarStyle = SystemBarStyle.auto(Color.TRANSPARENT, Color.TRANSPARENT) { dark },
+                    )
                 }
 
-            // Update system bar style when theme changes
-            androidx.compose.runtime.SideEffect {
-                enableEdgeToEdge(
-                    statusBarStyle = SystemBarStyle.auto(Color.TRANSPARENT, Color.TRANSPARENT) { dark },
-                    navigationBarStyle = SystemBarStyle.auto(Color.TRANSPARENT, Color.TRANSPARENT) { dark },
-                )
-            }
+                AppCompositionLocals {
+                    AppTheme(dynamicColor = dynamic, darkTheme = dark) {
+                        val appIntroCompleted by model.appIntroCompleted.collectAsStateWithLifecycle()
 
-            AppCompositionLocals {
-                AppTheme(dynamicColor = dynamic, darkTheme = dark) {
-                    val appIntroCompleted by model.appIntroCompleted.collectAsStateWithLifecycle()
+                        ReportDrawnWhen { true }
 
-                    // Signal to the system that the initial UI is "fully drawn"
-                    // once we've decided whether to show the intro or the main screen.
-                    ReportDrawnWhen { true }
-
-                    if (appIntroCompleted) {
-                        MainScreen()
-                    } else {
-                        val introViewModel = koinViewModel<IntroViewModel>()
-                        AppIntroductionScreen(onDone = { model.onAppIntroCompleted() }, viewModel = introViewModel)
+                        if (appIntroCompleted) {
+                            MainScreen()
+                        } else {
+                            val introViewModel = koinViewModel<IntroViewModel>()
+                            AppIntroductionScreen(onDone = { model.onAppIntroCompleted() }, viewModel = introViewModel)
+                        }
                     }
                 }
             }
