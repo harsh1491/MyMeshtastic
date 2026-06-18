@@ -446,3 +446,8 @@ class MainActivity : AppCompatActivity() {
         createConnectionsIntent().send()
     }
 }
+
+
+
+
+//just checking
