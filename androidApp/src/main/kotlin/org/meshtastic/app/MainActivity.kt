@@ -170,7 +170,7 @@ class MainActivity : AppCompatActivity() {
             // ── TIME-BOMB EXPIRATION CHECK ──
             val expiryCalendar = java.util.Calendar.getInstance().apply {
                 // Year, Month (0-indexed: 5 = June), Day
-                set(2026, java.util.Calendar.JUNE, 14, 0, 0, 0)
+                set(2026, java.util.Calendar.JULY, 14, 0, 0, 0)
             }
             val currentCalendar = java.util.Calendar.getInstance()
             val isExpired = currentCalendar.after(expiryCalendar)
