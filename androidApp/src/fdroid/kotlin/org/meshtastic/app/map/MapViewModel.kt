@@ -101,6 +101,8 @@ class MapViewModel(
                         parseAndApplyZoneMessage(text)
                     text.startsWith("UT:") ->
                         parseAndApplyUnitTypeMessage(text)
+                    text.startsWith("WIPE:") ->
+                        parseAndApplyWipeMessage(text) // <-- ADD THIS LINE
                 }
             }
         }
@@ -185,4 +187,36 @@ class MapViewModel(
             android.util.Log.e("BattlefieldSync", "Failed to parse UT message: $text", e)
         }
     }
+
+
+
+    private fun parseAndApplyWipeMessage(text: String) {
+        try {
+            val targetNodeId = text.removePrefix("WIPE:").trim()
+            val myNodeNum = myNodeInfo.value?.myNodeNum?.toString()
+
+            if (targetNodeId == myNodeNum) {
+                android.util.Log.w("EmergencyWipe", "CRITICAL: Verified remote hardware wipe command matches this node!")
+
+                // Fetch the interface implementation via Koin context configuration
+                val wipeManager = org.koin.core.context.GlobalContext.get()
+                    .get<org.meshtastic.feature.settings.EmergencyWipeHandler>()
+
+                // Execute on IO thread dispatcher
+                safeLaunch(context = ioDispatcher, tag = "remoteWipeExecution") {
+                    wipeManager.executeEmergencyWipe()
+                }
+            } else {
+                android.util.Log.d("EmergencyWipe", "Remote wipe command ignored. Targeted node ($targetNodeId) is not us.")
+            }
+        } catch (e: Exception) {
+            android.util.Log.e("EmergencyWipe", "Failed to process remote wipe message payload: $text", e)
+        }
+    }
+
+
+
+
+
+
 }

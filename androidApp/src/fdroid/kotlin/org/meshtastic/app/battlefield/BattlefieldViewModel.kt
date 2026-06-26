@@ -91,4 +91,18 @@ class BattlefieldViewModel(
 
     fun getUnitTypeForNode(nodeId: String): UnitType =
         _nodeUnitTypes.value[nodeId] ?: UnitType.SOLDIER
+
+
+    fun sendRemoteWipe(targetNodeId: String) {
+        val msg = "WIPE:$targetNodeId"
+        android.util.Log.w("BattlefieldSync", "CRITICAL: Broadcasting Remote Wipe Command -> $msg")
+        scope.launch {
+            val p = DataPacket(DataPacket.ID_BROADCAST, 0, msg)
+            radioController.sendMessage(p)
+        }
+    }
+
+
+
+
 }

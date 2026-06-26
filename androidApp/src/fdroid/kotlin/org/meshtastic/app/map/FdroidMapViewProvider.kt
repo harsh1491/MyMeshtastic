@@ -107,6 +107,8 @@ class FdroidMapViewProvider : MapViewProvider {
 
         var isInterrogationDialog by remember { mutableStateOf(false) }
 
+        var showKillConfirmDialog by remember { mutableStateOf(false) }
+
         // ── Memory for entry/exit detection ──
         val previousZonePresence = remember { mutableMapOf<String, Set<String>>() }
         var isFirstZoneCheck by remember { mutableStateOf(true) }
@@ -865,6 +867,22 @@ class FdroidMapViewProvider : MapViewProvider {
                             Text("2. INTERROGATE UNIT", fontWeight = androidx.compose.ui.text.font.FontWeight.Bold, color = Color.White)
                         }
 
+
+                        // ── ADD THIS BLOCK: Option 3: Kill Comm ──
+                        Button(
+                            onClick = {
+                                showActionMenu = false
+                                showKillConfirmDialog = true // Launch the confirmation alert
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFB71C1C)), // Pure Danger Red
+                            shape = androidx.compose.foundation.shape.RoundedCornerShape(2.dp)
+                        ) {
+                            Text("3. KILL COMM. UNIT", fontWeight = androidx.compose.ui.text.font.FontWeight.Bold, color = Color.White)
+                        }
+
+
+
                         TextButton(onClick = { showActionMenu = false }) {
                             Text("ABORT OPERATION", color = Color(0xFFE53935), fontWeight = androidx.compose.ui.text.font.FontWeight.Bold)
                         }
@@ -1097,6 +1115,51 @@ class FdroidMapViewProvider : MapViewProvider {
                 }
             }
         }
+
+
+        // ── Remote Kill Comm. Confirmation Dialog ──
+        if (showKillConfirmDialog && selectedRemoteNodeId != null) {
+            AlertDialog(
+                onDismissRequest = { showKillConfirmDialog = false },
+                title = {
+                    Text(
+                        "⚠ REMOTE DESTROY COMMAND",
+                        color = Color(0xFFE53935),
+                        fontWeight = androidx.compose.ui.text.font.FontWeight.Bold
+                    )
+                },
+                text = {
+                    Text(
+                        "Are you absolutely certain you want to kill communications for $selectedRemoteNodeName?\n\n" +
+                                "This will transmit an over-the-air payload instruction. The target device will immediately clear local mission data tables, flush secure parameters, and completely lock execution authorization.",
+                        color = Color.White
+                    )
+                },
+                containerColor = Color(0xFF121A16), // Tactical dark green background
+                confirmButton = {
+                    Button(
+                        onClick = {
+                            showKillConfirmDialog = false
+                            battlefieldVm.sendRemoteWipe(selectedRemoteNodeId!!) // Broadcast wipe packet
+                            selectedRemoteNodeId = null // Terminate target sequence
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFB71C1C)) // Solid Danger Red
+                    ) {
+                        Text("EXECUTE WIPE", color = Color.White, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold)
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = {
+                        showKillConfirmDialog = false
+                        selectedRemoteNodeId = null
+                    }) {
+                        Text("CANCEL", color = Color.Gray)
+                    }
+                }
+            )
+        }
+
+
 
     } // This closes Box wrapper
 } // This closes MapView function // This closes the MapView function scope safely
