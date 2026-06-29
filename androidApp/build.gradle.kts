@@ -154,6 +154,7 @@ configure<ApplicationExtension> {
             if (name == "google") {
                 manifestPlaceholders["MAPS_API_KEY"] = "dummy"
             }
+            buildConfigField("boolean", "IS_CONFIG_TOOL", (name == "configtool").toString())
         }
     }
 
@@ -191,6 +192,22 @@ androidComponents {
             if (tasks.names.contains(uploadTaskName) && tasks.names.contains(minifyTaskName)) {
                 tasks.named(minifyTaskName).configure { finalizedBy(uploadTaskName) }
             }
+        }
+    }
+}
+
+
+afterEvaluate {
+    tasks.findByName("processConfigtoolDebugGoogleServices")?.enabled = false
+    tasks.findByName("processConfigtoolReleaseGoogleServices")?.enabled = false
+}
+
+android {
+    sourceSets {
+        getByName("configtool") {
+            kotlin.srcDir("src/fdroid/kotlin")
+            java.srcDir("src/fdroid/java")
+            res.srcDirs("src/fdroid/res")
         }
     }
 }
@@ -285,8 +302,12 @@ dependencies {
     fdroidImplementation(libs.osmdroid.android)
     fdroidImplementation(libs.osmdroid.geopackage) { exclude(group = "com.j256.ormlite") }
     fdroidImplementation(libs.osmbonuspack)
-
     fdroidImplementation(libs.maplibre.android)
+
+    configtoolImplementation(libs.osmdroid.android)
+    configtoolImplementation(libs.osmdroid.geopackage) { exclude(group = "com.j256.ormlite") }
+    configtoolImplementation(libs.osmbonuspack)
+    configtoolImplementation(libs.maplibre.android)
 
     testImplementation(kotlin("test-junit"))
     testImplementation(libs.androidx.work.testing)

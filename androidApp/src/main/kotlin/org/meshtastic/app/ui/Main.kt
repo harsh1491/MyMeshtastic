@@ -57,8 +57,11 @@ fun MainScreen() {
     val viewModel: UIViewModel = koinViewModel()
     // Land on Connections for first-run / no-device-selected; otherwise on Nodes. Read synchronously
     // from the StateFlow (seeded from persisted prefs) so the initial tab is set in one shot.
+    // AFTER
     val initialTab =
-        if (viewModel.currentDeviceAddressFlow.value.isNullOrSelectedNone()) {
+        if (BuildConfig.IS_CONFIG_TOOL) {
+            TopLevelDestination.Settings.route
+        } else if (viewModel.currentDeviceAddressFlow.value.isNullOrSelectedNone()) {
             TopLevelDestination.Connections.route
         } else {
             NodesRoute.Nodes
@@ -69,10 +72,18 @@ fun MainScreen() {
     AndroidAppVersionCheck(viewModel)
 
     MeshtasticAppShell(multiBackstack = multiBackstack, uiViewModel = viewModel, hostModifier = Modifier) {
+        // AFTER
+        val visibleDestinations = if (BuildConfig.IS_CONFIG_TOOL) {
+            listOf(TopLevelDestination.Settings)
+        } else {
+            TopLevelDestination.entries
+        }
+
         MeshtasticNavigationSuite(
             multiBackstack = multiBackstack,
             uiViewModel = viewModel,
             modifier = Modifier.fillMaxSize(),
+            visibleDestinations = visibleDestinations,
         ) {
             val provider =
                 entryProvider<NavKey> {
@@ -87,7 +98,7 @@ fun MainScreen() {
                     )
                     mapGraph(backStack)
                     channelsGraph(backStack)
-                    connectionsGraph(backStack)
+                    connectionsGraph(backStack, isConfigTool = BuildConfig.IS_CONFIG_TOOL)
                     settingsGraph(backStack)
                     docsEntries(backStack)
                     firmwareGraph(backStack)

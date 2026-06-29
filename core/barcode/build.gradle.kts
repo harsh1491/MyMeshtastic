@@ -28,6 +28,15 @@ configure<LibraryExtension> {
     testOptions { unitTests { isIncludeAndroidResources = true } }
 }
 
+android {
+    sourceSets {
+        getByName("configtool") {
+            kotlin.srcDir("src/fdroid/kotlin")
+            java.srcDir("src/fdroid/kotlin")
+        }
+    }
+}
+
 dependencies {
     implementation(project(":core:resources"))
     implementation(projects.core.ui)
@@ -42,6 +51,7 @@ dependencies {
     // ML Kit is used for the Google flavor, while ZXing is used for F-Droid to avoid GMS dependencies.
     googleImplementation(libs.mlkit.barcode.scanning)
     fdroidImplementation(libs.zxing.core)
+    configtoolImplementation(libs.zxing.core)
     implementation(libs.androidx.camera.core)
     implementation(libs.androidx.camera.camera2)
     implementation(libs.androidx.camera.lifecycle)

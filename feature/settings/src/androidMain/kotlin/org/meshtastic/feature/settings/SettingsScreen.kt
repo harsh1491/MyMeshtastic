@@ -1,4 +1,4 @@
-package org.meshtastic.feature.settings
+ package org.meshtastic.feature.settings
 
 import android.app.Activity
 import android.content.Intent
@@ -61,6 +61,8 @@ import org.meshtastic.feature.settings.util.LanguageUtils.languageMap
 import org.meshtastic.proto.DeviceProfile
 import java.text.SimpleDateFormat
 import java.util.Locale
+
+import org.meshtastic.core.navigation.ConnectionsRoute
 
 import org.meshtastic.feature.settings.EmergencyWipeSection
 
@@ -183,6 +185,20 @@ fun SettingsScreen(
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
+
+
+            // ── DEVICE CONNECTION — always first ──
+            ExpressiveSection(title = "Device Connection") {
+                ListItem(
+                    text = "Connect via USB Serial",
+                    leadingIcon = null,
+                    trailingIcon = null,
+                ) {
+                    onNavigate(ConnectionsRoute.Connections)
+                }
+            }
+
+
             // ── BATTLEFIELD CONFIG — always first ──
             ExpressiveSection(title = "Battlefield Config") {
                 ListItem(

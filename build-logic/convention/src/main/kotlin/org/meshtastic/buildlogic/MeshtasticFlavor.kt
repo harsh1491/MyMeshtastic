@@ -30,6 +30,7 @@ enum class FlavorDimension {
 enum class MeshtasticFlavor(val dimension: FlavorDimension, val default: Boolean = false) {
     fdroid(FlavorDimension.marketplace),
     google(FlavorDimension.marketplace, default = true),
+    configtool(FlavorDimension.marketplace),
 }
 
 fun configureFlavors(

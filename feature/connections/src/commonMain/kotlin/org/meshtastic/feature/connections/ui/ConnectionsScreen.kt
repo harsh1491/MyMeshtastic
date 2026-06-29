@@ -99,10 +99,12 @@ fun ConnectionsScreen(
     connectionsViewModel: ConnectionsViewModel = koinViewModel(),
     scanModel: ScannerViewModel = koinViewModel(),
     radioConfigViewModel: RadioConfigViewModel = koinViewModel(),
+    isConfigTool: Boolean = false,
     onClickNodeChip: (Int) -> Unit,
     onNavigateToNodeDetails: (Int) -> Unit,
     onConfigNavigate: (Route) -> Unit,
-) {
+)
+{
     val radioConfigState by radioConfigViewModel.radioConfigState.collectAsStateWithLifecycle()
     val connectionProgress by scanModel.connectionProgressText.collectAsStateWithLifecycle()
     val connectionStatus by connectionsViewModel.connectionStatus.collectAsStateWithLifecycle()
@@ -122,9 +124,13 @@ fun ConnectionsScreen(
 
     val bleAutoScan by scanModel.bleAutoScan.collectAsStateWithLifecycle()
     val networkAutoScan by scanModel.networkAutoScan.collectAsStateWithLifecycle()
-    val showBleTransport by scanModel.showBleTransport.collectAsStateWithLifecycle()
-    val showNetworkTransport by scanModel.showNetworkTransport.collectAsStateWithLifecycle()
-    val showUsbTransport by scanModel.showUsbTransport.collectAsStateWithLifecycle()
+    // AFTER
+    val showBleTransportRaw by scanModel.showBleTransport.collectAsStateWithLifecycle()
+    val showNetworkTransportRaw by scanModel.showNetworkTransport.collectAsStateWithLifecycle()
+    val showUsbTransportRaw by scanModel.showUsbTransport.collectAsStateWithLifecycle()
+    val showBleTransport = if (isConfigTool) false else showBleTransportRaw
+    val showNetworkTransport = if (isConfigTool) false else showNetworkTransportRaw
+    val showUsbTransport = if (isConfigTool) true else showUsbTransportRaw
     val localNetworkPermissionGranted = isLocalNetworkPermissionGranted()
 
     // Android 17 (API 37) gates NSD/mDNS behind ACCESS_LOCAL_NETWORK. Without this prompt the platform
@@ -270,14 +276,16 @@ fun ConnectionsScreen(
 
                         // Inclusive transport-visibility filter chips. Sit between the connection card and the
                         // device list so users can hide entire transports they're not using.
-                        TransportFilterChips(
-                            showBle = showBleTransport,
-                            showNetwork = showNetworkTransport,
-                            showUsb = showUsbTransport,
-                            onToggleBle = { scanModel.setShowBleTransport(!showBleTransport) },
-                            onToggleNetwork = { scanModel.setShowNetworkTransport(!showNetworkTransport) },
-                            onToggleUsb = { scanModel.setShowUsbTransport(!showUsbTransport) },
-                        )
+                        if (!isConfigTool) {
+                            TransportFilterChips(
+                                showBle = showBleTransport,
+                                showNetwork = showNetworkTransport,
+                                showUsb = showUsbTransport,
+                                onToggleBle = { scanModel.setShowBleTransport(!showBleTransport) },
+                                onToggleNetwork = { scanModel.setShowNetworkTransport(!showNetworkTransport) },
+                                onToggleUsb = { scanModel.setShowUsbTransport(!showUsbTransport) },
+                            )
+                        }
                     },
                     second = {
                         // ── Unified device list ──

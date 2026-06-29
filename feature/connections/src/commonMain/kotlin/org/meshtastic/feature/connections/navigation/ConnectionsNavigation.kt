@@ -27,11 +27,15 @@ import org.meshtastic.feature.connections.ui.ConnectionsScreen
 import org.meshtastic.feature.settings.radio.RadioConfigViewModel
 
 /** Navigation graph for for the top level ConnectionsScreen - [ConnectionsRoute.Connections]. */
-fun EntryProviderScope<NavKey>.connectionsGraph(backStack: NavBackStack<NavKey>) {
+fun EntryProviderScope<NavKey>.connectionsGraph(
+    backStack: NavBackStack<NavKey>,
+    isConfigTool: Boolean = false,
+) {
     entry<ConnectionsRoute.Connections> {
         ConnectionsScreen(
             scanModel = koinViewModel<ScannerViewModel>(),
             radioConfigViewModel = koinViewModel<RadioConfigViewModel>(),
+            isConfigTool = isConfigTool,
             onClickNodeChip = { id -> backStack.add(NodesRoute.NodeDetail(id)) },
             onNavigateToNodeDetails = { id -> backStack.add(NodesRoute.NodeDetail(id)) },
             onConfigNavigate = { route -> backStack.add(route) },
