@@ -115,6 +115,7 @@ class FdroidMapViewProvider : MapViewProvider {
 
         val zones by zoneViewModel.zones.collectAsStateWithLifecycle()
         val nodes by mapViewModel.nodes.collectAsStateWithLifecycle()
+        val liveDroneTarget by mapViewModel.droneTarget.collectAsStateWithLifecycle() // <-- ADD THIS LINE
 
         // ── Update zones ──
         // ── Update zones and dynamically count units inside them ──
@@ -1157,6 +1158,65 @@ class FdroidMapViewProvider : MapViewProvider {
                     }
                 }
             )
+        }
+
+
+        // ── Real-Time High-Precision Drone Plotting Engine ──
+        // Cache the reference to the active map marker across recompositions
+        var activeDroneMarker by remember { mutableStateOf<org.maplibre.android.annotations.Marker?>(null) }
+
+        LaunchedEffect(liveDroneTarget, styleLoaded, mapLibreMap) {
+            if (!styleLoaded) return@LaunchedEffect
+            val map = mapLibreMap ?: return@LaunchedEffect
+            val target = liveDroneTarget ?: return@LaunchedEffect
+
+            // Wrap into MapLibre's coordinate data structure using absolute untrimmed precision values
+            val targetPosition = LatLng(target.latitude, target.longitude)
+
+            val currentMarker = activeDroneMarker
+            if (currentMarker != null) {
+                // HIGH ACCURACY STEP: Directly update coordinates on the active hardware thread.
+                // This updates position arrays smoothly without triggering heavy map layer rebuilds.
+                currentMarker.position = targetPosition
+                currentMarker.title = target.deviceType
+                currentMarker.snippet = "Alt: ${target.altitude}m | RF: ${target.frequency}MHz"
+            } else {
+                // Setup and load custom marker icon styling properties
+                val iconFactory = org.maplibre.android.annotations.IconFactory.getInstance(context)
+
+                // Note: Ensure you add a custom drone png asset into your drawables folder.
+                // Fallback to company logo asset to ensure runtime execution stability during layout compilation.
+                val droneDrawable = if (org.meshtastic.app.R.drawable.marker_drone != 0) {
+                    org.meshtastic.app.R.drawable.marker_drone
+                } else {
+                    android.R.drawable.ic_menu_compass
+                }
+
+
+                // ── PROGRESSIVE RESIZING ENGINE: Handles both PNG and Vector XML seamlessly ──
+                val drawable = androidx.core.content.res.ResourcesCompat.getDrawable(context.resources, droneDrawable, null)
+
+                // Target dimensions in pixels (Adjust 48 to 32 for smaller, or 64 for larger)
+                val targetSizePx = 64
+
+                val bitmap = android.graphics.Bitmap.createBitmap(targetSizePx, targetSizePx, android.graphics.Bitmap.Config.ARGB_8888)
+                val canvas = android.graphics.Canvas(bitmap)
+                drawable?.setBounds(0, 0, canvas.width, canvas.height)
+                drawable?.draw(canvas)
+
+                val customIcon = iconFactory.fromBitmap(bitmap)
+                // ─────────────────────────────────────────────────────────────────────────────
+
+                // Instantiate the target marker plot configuration parameters
+                val markerOptions = org.maplibre.android.annotations.MarkerOptions()
+                    .position(targetPosition)
+                    .title(target.deviceType)
+                    .snippet("Alt: ${target.altitude}m | RF: ${target.frequency}MHz")
+                    .icon(customIcon)
+
+                activeDroneMarker = map.addMarker(markerOptions)
+                android.util.Log.d("MapDroneTrack", "Drone target vector initialized on map coordinates: ${target.latitude}, ${target.longitude}")
+            }
         }
 
 

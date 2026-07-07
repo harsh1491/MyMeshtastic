@@ -126,4 +126,10 @@ class AppKoinModule {
     @Single
     fun provideEmergencyWipeManager(application: Application): EmergencyWipeHandler =
         EmergencyWipeManager(application)
+
+
+    @Single
+    fun provideAntSdrManager(application: Application): org.meshtastic.app.sdr.AntSdrManager =
+        org.meshtastic.app.sdr.AntSdrManager(application)
 }
+

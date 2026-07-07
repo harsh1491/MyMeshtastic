@@ -116,6 +116,8 @@ class MainActivity : AppCompatActivity() {
 
     private val usbRepository: UsbRepository by inject()
 
+    private val antSdrManager: org.meshtastic.app.sdr.AntSdrManager by inject() // <-- ADD THIS LINE
+
     /**
      * Activity-lifecycle-aware client that binds to the mesh service. Note: This is used implicitly as it registers
      * itself as a LifecycleObserver in its init block.
@@ -146,6 +148,13 @@ class MainActivity : AppCompatActivity() {
             if (myId.isNotEmpty()) {
                 battlefieldVm.resetToSoldierOnLaunch(myId)
             }
+        }
+
+        // ── ADD THIS BLOCK: Initialize AntSDR Listening Stream ──
+        lifecycleScope.launch {
+            delay(3000) // Give the USB hub sub-stack a moment to settle down on app launch
+            android.util.Log.d("AntSDR_USB", "Initializing automated over-the-air drone tracker...")
+            antSdrManager.startListening()
         }
 
         super.onCreate(savedInstanceState)
@@ -398,6 +407,10 @@ class MainActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         super.onDestroy()
+
+        antSdrManager.stopListening() // <-- ADD THIS LINE: Closes serial stream links safely
+
+
         val battlefieldVm: BattlefieldViewModel by inject()
         val nodeRepository: NodeRepository by inject()
         val myId = nodeRepository.myId.value ?: ""

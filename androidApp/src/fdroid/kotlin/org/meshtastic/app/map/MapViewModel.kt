@@ -44,6 +44,14 @@ class MapViewModel(
     private val _selectedWaypointId = MutableStateFlow(savedStateHandle.get<Int>("waypointId"))
     val selectedWaypointId: StateFlow<Int?> = _selectedWaypointId.asStateFlow()
 
+    // ── Lazy-link directly into the active AntSdr global context ──
+    private val antSdrManager: org.meshtastic.app.sdr.AntSdrManager by lazy {
+        org.koin.core.context.GlobalContext.get().get()
+    }
+
+    // Expose the high-accuracy data thread directly to the Map layout
+    val droneTarget: StateFlow<org.meshtastic.app.sdr.DroneTarget?> = antSdrManager.droneTarget
+
     fun setWaypointId(id: Int?) {
         if (_selectedWaypointId.value != id) {
             _selectedWaypointId.value = id
