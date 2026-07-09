@@ -285,6 +285,31 @@ fun SettingsScreen(
                     onNavigate(SettingsRoute.HelpDocs)
                 }
             }
+
+
+            // ── ADD THIS BLOCK: Drone Alarm Settings Row ──
+            // ── Drone Detection Configuration Row ──
+            val context = androidx.compose.ui.platform.LocalContext.current
+            val sharedPrefs = remember { context.getSharedPreferences("battlefield_alerts", android.content.Context.MODE_PRIVATE) }
+            var alarmSoundOn by remember { mutableStateOf(sharedPrefs.getBoolean("drone_alarm_sound", true)) }
+
+            ExpressiveSection(title = "Drone Detection Configuration") {
+                org.meshtastic.core.ui.component.ListItem(
+                    text = "Drone Detection Alarm Audio",
+                    supportingText = if (alarmSoundOn) "Siren enabled on target acquisition" else "Silent monitoring mode active",
+                    leadingIcon = MeshtasticIcons.HelpOutline,
+                    trailingIcon = null
+                ) {
+                    val nextValue = !alarmSoundOn
+                    alarmSoundOn = nextValue // Updates the UI instantly
+                    sharedPrefs.edit().putBoolean("drone_alarm_sound", nextValue).apply() // Saves to disk
+                    android.util.Log.d("SettingsAlert", "Drone alarm sound written directly to preferences: $nextValue")
+                }
+            }
+
+
+
+
             // ── Emergency Data Wipe — always last ──
             EmergencyWipeSection()
         }

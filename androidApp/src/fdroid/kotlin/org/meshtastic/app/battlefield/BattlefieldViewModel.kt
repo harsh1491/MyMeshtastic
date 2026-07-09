@@ -16,10 +16,13 @@ import org.meshtastic.core.model.DataPacket
 import org.meshtastic.core.model.RadioController
 import org.meshtastic.core.prefs.BattlefieldPrefs
 
+import kotlinx.coroutines.flow.asStateFlow
+
 @Single
 class BattlefieldViewModel(
     private val prefs: BattlefieldPrefs,
     private val radioController: RadioController,
+    private val context: android.content.Context
 ) : ViewModel() {
 
     private val scope = CoroutineScope(SupervisorJob())
@@ -32,6 +35,17 @@ class BattlefieldViewModel(
     val nodeUnitTypes: StateFlow<Map<String, UnitType>> = _nodeUnitTypes.asStateFlow()
 
     private var myNodeId: String = ""
+
+    private val sharedPrefs = context.getSharedPreferences("battlefield_alerts", android.content.Context.MODE_PRIVATE)
+    private val _droneAlarmEnabled = MutableStateFlow<Boolean>(sharedPrefs.getBoolean("drone_alarm_sound", true))
+    val droneAlarmEnabled: StateFlow<Boolean> = _droneAlarmEnabled.asStateFlow()
+
+
+    fun setDroneAlarmEnabled(enabled: Boolean) {
+        _droneAlarmEnabled.value = enabled
+        sharedPrefs.edit().putBoolean("drone_alarm_sound", enabled).apply()
+        android.util.Log.d("BattlefieldSync", "Drone alarm sound preference updated: $enabled")
+    }
 
     fun setMyNodeId(nodeId: String) {
         android.util.Log.d("MarkerFix", "setMyNodeId called with: $nodeId")

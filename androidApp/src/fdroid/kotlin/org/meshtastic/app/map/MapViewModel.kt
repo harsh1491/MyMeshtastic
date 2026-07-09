@@ -31,6 +31,7 @@ class MapViewModel(
     radioConfigRepository: RadioConfigRepository,
     buildConfigProvider: BuildConfigProvider,
     savedStateHandle: SavedStateHandle,
+    private val context: android.content.Context
 ) : BaseMapViewModel(mapPrefs, nodeRepository, packetRepository, radioController) {
 
     private val zoneViewModel: ZoneViewModel by lazy {
@@ -50,7 +51,12 @@ class MapViewModel(
     }
 
     // Expose the high-accuracy data thread directly to the Map layout
-    val droneTarget: StateFlow<org.meshtastic.app.sdr.DroneTarget?> = antSdrManager.droneTarget
+    // Change your old droneTarget variable line to this:
+    private val _unifiedDroneTarget = MutableStateFlow<org.meshtastic.app.sdr.DroneTarget?>(null)
+    val droneTarget: StateFlow<org.meshtastic.app.sdr.DroneTarget?> = _unifiedDroneTarget.asStateFlow()
+
+    private var lastAlarmTimestamp = 0L // Cooldown tracking variable to prevent audio spam
+    private var lastDroneSeenTimestamp = 0L
 
     fun setWaypointId(id: Int?) {
         if (_selectedWaypointId.value != id) {
@@ -95,22 +101,53 @@ class MapViewModel(
     }
 
     init {
+
+        // ── ADD THIS ENGINE: 5-Second Drone Inactivity Timeout Sweeper ──
+        safeLaunch(context = ioDispatcher, tag = "droneTimeoutSweeper") {
+            while (true) {
+                kotlinx.coroutines.delay(1000) // Check the clock once per second
+                if (_unifiedDroneTarget.value != null && (System.currentTimeMillis() - lastDroneSeenTimestamp) > 5000) {
+                    android.util.Log.w("DroneTrack", "⏱ Inactivity Timeout: No drone telemetry received for 5s. Clearing target.")
+                    _unifiedDroneTarget.value = null // Clears the flow state completely
+                }
+            }
+        }
+
+
+        // Pipeline A: Monitor the LOCAL physical AntSDR USB-C port thread
+        safeLaunch(context = ioDispatcher, tag = "localSdrListener") {
+            antSdrManager.droneTarget.collect { target ->
+                if (target != null) {
+                    lastDroneSeenTimestamp = System.currentTimeMillis() // ── RESET TIMEOUT ──
+                    _unifiedDroneTarget.value = target
+                    triggerAlarmAudioNotification()
+
+                    val payload = "DRONE:${target.latitude},${target.longitude},${target.deviceType},${target.altitude},${target.frequency}"
+                    sendRawMessage(payload)
+                }
+            }
+        }
+
+        // Pipeline B: Monitor incoming mesh network messages from REMOTE teammates
         safeLaunch(context = ioDispatcher, tag = "meshMessageListener") {
             val meshDataHandler: org.meshtastic.core.repository.MeshDataHandler =
                 org.koin.core.context.GlobalContext.get().get()
 
             meshDataHandler.battlefieldMessages.collect { dataPacket ->
                 val text = dataPacket.text ?: return@collect
-                // Skip our own outgoing messages
                 if (dataPacket.from == DataPacket.ID_LOCAL) return@collect
-                android.util.Log.d("ZoneSync", "Battlefield message received: $text")
+
                 when {
                     text.startsWith("Z:") || text.startsWith("ZX:") ->
                         parseAndApplyZoneMessage(text)
                     text.startsWith("UT:") ->
                         parseAndApplyUnitTypeMessage(text)
                     text.startsWith("WIPE:") ->
-                        parseAndApplyWipeMessage(text) // <-- ADD THIS LINE
+                        parseAndApplyWipeMessage(text)
+                    text.startsWith("DRONE:") -> {
+                        lastDroneSeenTimestamp = System.currentTimeMillis() // ── RESET TIMEOUT ──
+                        parseAndApplyMeshDroneTarget(text)
+                    }
                 }
             }
         }
@@ -219,6 +256,65 @@ class MapViewModel(
             }
         } catch (e: Exception) {
             android.util.Log.e("EmergencyWipe", "Failed to process remote wipe message payload: $text", e)
+        }
+    }
+
+
+
+    private fun parseAndApplyMeshDroneTarget(text: String) {
+        try {
+            // Format: DRONE:lat,lon,deviceType,altitude,frequency
+            val parts = text.removePrefix("DRONE:").split(",")
+            if (parts.size < 5) return
+
+            val lat = parts[0].toDouble() // Preserves un-truncated floating point accuracy
+            val lon = parts[1].toDouble()
+            val deviceType = parts[2].trim()
+            val altitude = parts[3].toDouble()
+            val frequency = parts[4].toDouble()
+
+            // Push target data to the map UI collector thread
+            _unifiedDroneTarget.value = org.meshtastic.app.sdr.DroneTarget(
+                deviceType = deviceType,
+                latitude = lat,
+                longitude = lon,
+                altitude = altitude,
+                frequency = frequency
+            )
+
+            // Trigger audio notification sequence for teammates
+            triggerAlarmAudioNotification()
+
+        } catch (e: Exception) {
+            android.util.Log.e("MeshDroneParser", "Failed parsing mesh telemetry packet: $text", e)
+        }
+    }
+
+    private fun triggerAlarmAudioNotification() {
+        if (!battlefieldViewModel.droneAlarmEnabled.value) return
+
+        val currentTime = System.currentTimeMillis()
+        if (currentTime - lastAlarmTimestamp > 10000) {
+            lastAlarmTimestamp = currentTime
+
+            safeLaunch(context = kotlinx.coroutines.Dispatchers.Main, tag = "sirenPlayback") {
+                try {
+                    val resId = context.resources.getIdentifier("drone_alarm", "raw", context.packageName)
+                    if (resId != 0) {
+                        val mediaPlayer = android.media.MediaPlayer.create(context, resId)
+
+                        // ── ADD SAFE CALLS (?.) TO PREVENT NULL COMPILATION ERRORS ──
+                        mediaPlayer?.setOnCompletionListener { mp -> mp.release() }
+                        mediaPlayer?.start()
+
+                        android.util.Log.i("AlertEngine", "⚠ Threat Siren Executed Successfully.")
+                    } else {
+                        android.util.Log.w("AlertEngine", "Audio resource file 'drone_alarm' missing from res/raw folder.")
+                    }
+                } catch (e: Exception) {
+                    android.util.Log.e("AlertEngine", "MediaPlayer execution fault: ${e.message}")
+                }
+            }
         }
     }
 

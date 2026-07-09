@@ -258,7 +258,7 @@ class MeshDataHandlerImpl(
         } else {
             // Intercept battlefield messages — emit to flow, skip database
             val text = dataPacket.text.orEmpty()
-            if (text.startsWith("Z:") || text.startsWith("ZX:") || text.startsWith("UT:") || text.startsWith("WIPE:")) {
+            if (text.startsWith("Z:") || text.startsWith("ZX:") || text.startsWith("UT:") || text.startsWith("WIPE:") || text.startsWith("DRONE:")) {
                 scope.launch { _battlefieldMessages.emit(dataPacket) }
                 return  // do NOT save to database, do NOT show in chat
             }
