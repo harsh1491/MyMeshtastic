@@ -397,7 +397,9 @@ class MeshDataHandlerImpl(
         // Safety net — battlefield messages should already be intercepted in handleTextMessage
         // but filter them here too just in case
         val text = dataPacket.text.orEmpty()
-        if (text.startsWith("Z:") || text.startsWith("ZX:") || text.startsWith("UT:")) return true
+
+        // ── UPDATE THIS LINE: Force WIPE and DRONE tags to be swallowed by the database filter ──
+        if (text.startsWith("Z:") || text.startsWith("ZX:") || text.startsWith("UT:") || text.startsWith("WIPE:") || text.startsWith("DRONE:")) return true
 
         val isFilteringDisabled = getContactSettings(contactKey).filteringDisabled
         return messageFilter.shouldFilter(text, isFilteringDisabled)
