@@ -319,6 +319,14 @@ class MapViewModel(
     }
 
 
+    // ── Call this to flush memory states when the map layout is destroyed ──
+    fun clearDroneTarget() {
+        _unifiedDroneTarget.value = null
+        lastDroneSeenTimestamp = 0L
+        android.util.Log.d("DroneTrack", "Volatile drone state memory completely cleared.")
+    }
+
+
 
 
 

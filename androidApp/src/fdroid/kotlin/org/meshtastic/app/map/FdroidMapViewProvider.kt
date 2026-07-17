@@ -296,24 +296,33 @@ class FdroidMapViewProvider : MapViewProvider {
         LaunchedEffect(styleLoaded) {
             if (!styleLoaded) return@LaunchedEffect
 
-            // Try cached location first for immediate marker
             val cachedLoc = getPhoneLocation(context)
             val myNodeNum = mapViewModel.myNodeInfo.value?.myNodeNum
+
+            // Define matching time metrics (120 seconds online check)
+            val TIMEOUT_SECONDS = 120
+            val currentTimeSecs = System.currentTimeMillis() / 1000
 
             if (cachedLoc != null && myNodeNum != null) {
                 val map = mapLibreMap ?: return@LaunchedEffect
                 val currentNodes = mapViewModel.nodes.value
                 val markerData = mutableListOf<NodeMarkerData>()
 
-                currentNodes.filter { it.validPosition != null && it.num != myNodeNum }
-                    .forEach { node ->
-                        markerData.add(NodeMarkerData(
-                            id = node.num.toString(),
-                            lat = node.latitude,
-                            lon = node.longitude,
-                            shortName = node.user.short_name ?: "?"
-                        ))
-                    }
+                // ── FIXED LINE: Added active online filters to stop historical garbage placements ──
+                currentNodes.filter { node ->
+                    val hasPosition = node.validPosition != null
+                    val isNotMe = node.num != myNodeNum
+                    val lastHeardSecs = node.lastHeard?.toLong() ?: 0L
+                    val isOnline = (currentTimeSecs - lastHeardSecs) <= TIMEOUT_SECONDS
+                    hasPosition && isNotMe && isOnline
+                }.forEach { node ->
+                    markerData.add(NodeMarkerData(
+                        id = node.num.toString(),
+                        lat = node.latitude,
+                        lon = node.longitude,
+                        shortName = node.user?.short_name ?: "?"
+                    ))
+                }
 
                 val myNode = currentNodes.firstOrNull { it.num == myNodeNum }
                 val myLat = myNode?.takeIf { it.validPosition != null }?.latitude ?: cachedLoc.latitude
@@ -336,7 +345,7 @@ class FdroidMapViewProvider : MapViewProvider {
                 )
             }
 
-            // Then try fresh GPS and update again
+            // Then try fresh GPS and update again with the same filters
             kotlinx.coroutines.delay(500)
             val freshLoc = requestFreshLocation(context)
             if (freshLoc != null && myNodeNum != null) {
@@ -344,15 +353,21 @@ class FdroidMapViewProvider : MapViewProvider {
                 val currentNodes = mapViewModel.nodes.value
                 val markerData = mutableListOf<NodeMarkerData>()
 
-                currentNodes.filter { it.validPosition != null && it.num != myNodeNum }
-                    .forEach { node ->
-                        markerData.add(NodeMarkerData(
-                            id = node.num.toString(),
-                            lat = node.latitude,
-                            lon = node.longitude,
-                            shortName = node.user.short_name ?: "?"
-                        ))
-                    }
+                // ── FIXED LINE: Added matching filters here as well ──
+                currentNodes.filter { node ->
+                    val hasPosition = node.validPosition != null
+                    val isNotMe = node.num != myNodeNum
+                    val lastHeardSecs = node.lastHeard?.toLong() ?: 0L
+                    val isOnline = (currentTimeSecs - lastHeardSecs) <= TIMEOUT_SECONDS
+                    hasPosition && isNotMe && isOnline
+                }.forEach { node ->
+                    markerData.add(NodeMarkerData(
+                        id = node.num.toString(),
+                        lat = node.latitude,
+                        lon = node.longitude,
+                        shortName = node.user?.short_name ?: "?"
+                    ))
+                }
 
                 val myNode = currentNodes.firstOrNull { it.num == myNodeNum }
                 val myLat = myNode?.takeIf { it.validPosition != null }?.latitude ?: freshLoc.latitude
@@ -373,7 +388,6 @@ class FdroidMapViewProvider : MapViewProvider {
                     myNodeId = myNodeNum.toString(),
                     getUnitType = { nodeId -> battlefieldVm.getUnitTypeForNode(nodeId) }
                 )
-                android.util.Log.d("MarkerFix", "Fresh GPS marker placed: ${freshLoc.latitude}, ${freshLoc.longitude}")
             }
         }
 
@@ -432,7 +446,11 @@ class FdroidMapViewProvider : MapViewProvider {
                 }
             }
             lifecycle.addObserver(observer)
-            onDispose { lifecycle.removeObserver(observer) }
+            onDispose {
+                lifecycle.removeObserver(observer)
+                // ── ADD THIS LINE: Wipes out the drone sticky note state on screen exit ──
+                mapViewModel.clearDroneTarget()
+            }
         }
 
         Box(modifier = modifier.fillMaxSize()) {
