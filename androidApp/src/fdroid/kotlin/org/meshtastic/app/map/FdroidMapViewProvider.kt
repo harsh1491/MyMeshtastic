@@ -56,6 +56,10 @@ import java.io.File
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.height
 
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+
 import androidx.compose.material3.OutlinedTextField
 
 import android.location.LocationManager
@@ -77,6 +81,9 @@ class FdroidMapViewProvider : MapViewProvider {
 
         val context = LocalContext.current
         val lifecycle = LocalLifecycleOwner.current.lifecycle
+
+        // ── ADD THIS LINE: Instantiates the asynchronous interface worker thread scope ──
+        val coroutineScope = rememberCoroutineScope()
 
         MapLibre.getInstance(context)
 
@@ -835,8 +842,15 @@ class FdroidMapViewProvider : MapViewProvider {
         }
 
         // ── Tactical Action Selection Menu ──
+        // ── Tactical Action Selection Menu (Commander's Profile) ──
         if (showActionMenu && selectedRemoteNodeId != null) {
-            androidx.compose.ui.window.Dialog(onDismissRequest = { showActionMenu = false }) {
+            androidx.compose.ui.window.Dialog(
+                onDismissRequest = {
+                    // ── FIX: Clear BOTH states so clicking outside safely closes everything ──
+                    showActionMenu = false
+                    selectedRemoteNodeId = null
+                }
+            ) {
                 androidx.compose.material3.Surface(
                     shape = androidx.compose.foundation.shape.RoundedCornerShape(4.dp),
                     color = Color(0xFF121A16),
@@ -863,8 +877,8 @@ class FdroidMapViewProvider : MapViewProvider {
                         // Option 1: Message
                         Button(
                             onClick = {
-                                isInterrogationDialog = false // Route to standard messaging
-                                showActionMenu = false
+                                isInterrogationDialog = false // Route to standard custom text box layout
+                                showActionMenu = false        // Swaps views cleanly
                             },
                             modifier = Modifier.fillMaxWidth(),
                             colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF37474F)),
@@ -873,11 +887,34 @@ class FdroidMapViewProvider : MapViewProvider {
                             Text("1. MESSAGE UNIT", fontWeight = androidx.compose.ui.text.font.FontWeight.Bold, color = Color.White)
                         }
 
-                        // Option 2: Interrogate
+                        // Option 2: Interrogate (Updated to automate 5x sequential bursts)
                         Button(
                             onClick = {
-                                isInterrogationDialog = true // Route to verification challenge panel
+                                val targetId = selectedRemoteNodeId
+                                if (targetId != null) {
+                                    // ── NON-BLOCKING TACTICAL BURST ENGINE ──
+                                    // Launches on a background worker loop so it doesn't freeze the user interface map
+                                    coroutineScope.launch {
+                                        repeat(5) { burstIndex ->
+                                            mapViewModel.sendDirectMessage(targetId, "INTERROGATE")
+                                            android.util.Log.d("TacticalC2", "Burst payload [${burstIndex + 1}/5] pushed to radio stack.")
+
+                                            // Introduces a 1.2-second buffer delay to allow the LilyGO queue to clear cleanly
+                                            delay(3000)
+                                        }
+                                        android.util.Log.i("TacticalC2", "Completed 5-sequence Interrogation burst transmission to node: $targetId")
+                                    }
+
+                                    android.widget.Toast.makeText(
+                                        context,
+                                        "Sending 5x Interrogation Command",
+                                        android.widget.Toast.LENGTH_SHORT
+                                    ).show()
+                                }
+
+                                // Close the interaction panel window cleanly right away
                                 showActionMenu = false
+                                selectedRemoteNodeId = null
                             },
                             modifier = Modifier.fillMaxWidth(),
                             colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF8B0000)),
@@ -886,23 +923,27 @@ class FdroidMapViewProvider : MapViewProvider {
                             Text("2. INTERROGATE UNIT", fontWeight = androidx.compose.ui.text.font.FontWeight.Bold, color = Color.White)
                         }
 
-
-                        // ── ADD THIS BLOCK: Option 3: Kill Comm ──
+                        // Option 3: Kill Comm
                         Button(
                             onClick = {
                                 showActionMenu = false
-                                showKillConfirmDialog = true // Launch the confirmation alert
+                                showKillConfirmDialog = true
                             },
                             modifier = Modifier.fillMaxWidth(),
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFB71C1C)), // Pure Danger Red
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFB71C1C)),
                             shape = androidx.compose.foundation.shape.RoundedCornerShape(2.dp)
                         ) {
                             Text("3. KILL COMM. UNIT", fontWeight = androidx.compose.ui.text.font.FontWeight.Bold, color = Color.White)
                         }
 
-
-
-                        TextButton(onClick = { showActionMenu = false }) {
+                        // Abort Button
+                        TextButton(
+                            onClick = {
+                                // ── FIX: Clear BOTH states here so manual cancel stops the chain ──
+                                showActionMenu = false
+                                selectedRemoteNodeId = null
+                            }
+                        ) {
                             Text("ABORT OPERATION", color = Color(0xFFE53935), fontWeight = androidx.compose.ui.text.font.FontWeight.Bold)
                         }
                     }
