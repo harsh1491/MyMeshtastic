@@ -98,13 +98,13 @@ fun AppInfoSection(
             settingsLauncher.launch(intent)
         }
 
-        ListItem(
-            text = stringResource(Res.string.acknowledgements),
-            leadingIcon = MeshtasticIcons.Info,
-            trailingIcon = MeshtasticIcons.ChevronRight,
-        ) {
-            onNavigateToAbout()
-        }
+//        ListItem(
+//            text = stringResource(Res.string.acknowledgements),
+//            leadingIcon = MeshtasticIcons.Info,
+//            trailingIcon = MeshtasticIcons.ChevronRight,
+//        ) {
+//            onNavigateToAbout()
+//        }
 
         AppVersionButton(
             excludedModulesUnlocked = excludedModulesUnlocked,

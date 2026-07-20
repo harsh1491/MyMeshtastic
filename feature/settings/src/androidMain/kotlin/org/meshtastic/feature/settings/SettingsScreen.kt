@@ -293,14 +293,14 @@ fun SettingsScreen(
                 )
             }
 
-            ExpressiveSection(title = stringResource(Res.string.help_and_documentation)) {
-                ListItem(
-                    text = stringResource(Res.string.help_and_documentation),
-                    leadingIcon = MeshtasticIcons.HelpOutline,
-                ) {
-                    onNavigate(SettingsRoute.HelpDocs)
-                }
-            }
+//            ExpressiveSection(title = stringResource(Res.string.help_and_documentation)) {
+//                ListItem(
+//                    text = stringResource(Res.string.help_and_documentation),
+//                    leadingIcon = MeshtasticIcons.HelpOutline,
+//                ) {
+//                    onNavigate(SettingsRoute.HelpDocs)
+//                }
+//            }
             // ── Emergency Data Wipe — always last ──
             EmergencyWipeSection()
         }
