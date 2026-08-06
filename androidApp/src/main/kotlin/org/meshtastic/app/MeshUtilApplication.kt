@@ -112,6 +112,14 @@ open class MeshUtilApplication :
             val meshPrefs: MeshPrefs = get()
             dbManager.init(meshPrefs.deviceAddress.value)
         }
+
+
+        try {
+            org.koin.core.context.GlobalContext.get().get<org.meshtastic.app.gateway.GatewaySocketManager>()
+        } catch (e: Exception) {
+            android.util.Log.e("GatewayBoot", "Gateway init defer: ${e.message}")
+        }
+
     }
 
     override fun onTerminate() {

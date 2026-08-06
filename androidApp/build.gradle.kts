@@ -31,6 +31,7 @@ plugins {
     alias(libs.plugins.secrets)
     id("meshtastic.aboutlibraries")
     id("dev.mokkery")
+    id("kotlinx-serialization")
 }
 
 val keystorePropertiesFile = rootProject.file("keystore.properties")

@@ -131,5 +131,20 @@ class AppKoinModule {
     @Single
     fun provideAntSdrManager(application: Application): org.meshtastic.app.sdr.AntSdrManager =
         org.meshtastic.app.sdr.AntSdrManager(application)
+
+
+    @Single
+    fun provideGatewaySocketManager(): org.meshtastic.app.gateway.GatewaySocketManager {
+        val manager = org.meshtastic.app.gateway.GatewaySocketManager()
+        manager.connect() // Connects immediately on app boot
+        return manager
+    }
+
+    @Single
+    fun provideGatewayInterceptor(): org.meshtastic.core.data.gateway.GatewayInterceptor =
+        org.meshtastic.app.gateway.GatewayInterceptorEngine()
+
+
+
 }
 

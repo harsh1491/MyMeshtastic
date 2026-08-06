@@ -20,6 +20,8 @@ import co.touchlab.kermit.Logger
 import co.touchlab.kermit.Severity
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import okio.ByteString
@@ -28,6 +30,7 @@ import org.koin.core.annotation.Single
 import org.meshtastic.core.common.util.handledLaunch
 import org.meshtastic.core.common.util.nowMillis
 import org.meshtastic.core.common.util.nowSeconds
+import org.meshtastic.core.data.gateway.GatewayInterceptor
 import org.meshtastic.core.model.DataPacket
 import org.meshtastic.core.model.MessageStatus
 import org.meshtastic.core.model.Node
@@ -68,17 +71,8 @@ import org.meshtastic.proto.StatusMessage
 import org.meshtastic.proto.User
 import org.meshtastic.proto.Waypoint
 
-import kotlinx.coroutines.flow.MutableSharedFlow
-import kotlinx.coroutines.flow.SharedFlow
-
 /**
  * Implementation of [MeshDataHandler] that decodes and routes incoming mesh data packets.
- *
- * This class handles the complexity of:
- * 1. Mapping raw [MeshPacket] objects to domain-friendly [DataPacket] objects.
- * 2. Routing packets to specialized handlers (e.g., Traceroute, NeighborInfo, Telemetry, Admin, SFPP).
- * 3. Managing message history and persistence.
- * 4. Triggering notifications for various packet types (Text, Waypoints).
  */
 @Suppress("LongParameterList", "TooManyFunctions", "CyclomaticComplexMethod")
 @Single
@@ -100,6 +94,7 @@ class MeshDataHandlerImpl(
     private val telemetryHandler: TelemetryPacketHandler,
     private val adminPacketHandler: AdminPacketHandler,
     @Named("ServiceScope") private val scope: CoroutineScope,
+    private val gatewayInterceptor: Lazy<GatewayInterceptor>, // ── INJECTED VIA KOIN ──
 ) : MeshDataHandler {
 
     private val rememberDataType =
@@ -151,7 +146,15 @@ class MeshDataHandlerImpl(
 
             PortNum.NODEINFO_APP -> if (!fromUs) handleNodeInfo(packet)
 
-            PortNum.TELEMETRY_APP -> telemetryHandler.handleTelemetry(packet, dataPacket, myNodeNum)
+            PortNum.TELEMETRY_APP -> {
+                telemetryHandler.handleTelemetry(packet, dataPacket, myNodeNum)
+                // ── GATEWAY INGESTION HOOK FOR TELEMETRY PINGS ──
+                try {
+                    gatewayInterceptor.value.processIncomingPacket(dataPacket)
+                } catch (_: Exception) {
+                    // Silently ignore if gateway is inactive
+                }
+            }
 
             else ->
                 shouldBroadcast =
@@ -205,20 +208,18 @@ class MeshDataHandlerImpl(
             PortNum.ATAK_PLUGIN,
             PortNum.ATAK_PLUGIN_V2,
             PortNum.PRIVATE_APP,
-            -> {
+                -> {
                 shouldBroadcast = true
             }
 
             PortNum.RANGE_TEST_APP,
             PortNum.DETECTION_SENSOR_APP,
-            -> {
+                -> {
                 handleRangeTest(dataPacket, myNodeNum)
                 shouldBroadcast = true
             }
 
             else -> {
-                // By default, if we don't know what it is, we should probably broadcast it
-                // so that external apps can handle it.
                 shouldBroadcast = true
             }
         }
@@ -241,6 +242,13 @@ class MeshDataHandlerImpl(
         val p = Position.ADAPTER.decodeOrNull(payload, Logger) ?: return
         Logger.d { "Position from ${packet.from}: ${Position.ADAPTER.toOneLiner(p)}" }
         nodeManager.handleReceivedPosition(packet.from, myNodeNum, p, dataPacket.time)
+
+        // ── GATEWAY INGESTION HOOK FOR POSITION PINGS ──
+        try {
+            gatewayInterceptor.value.processIncomingPacket(dataPacket)
+        } catch (_: Exception) {
+            // Silently ignore if gateway is inactive
+        }
     }
 
     private fun handleWaypoint(packet: MeshPacket, dataPacket: DataPacket, myNodeNum: Int) {
@@ -252,6 +260,14 @@ class MeshDataHandlerImpl(
     }
 
     private fun handleTextMessage(packet: MeshPacket, dataPacket: DataPacket, myNodeNum: Int) {
+
+        // ── GATEWAY INGESTION HOOK FOR TEXT/MESSAGES ──
+        try {
+            gatewayInterceptor.value.processIncomingPacket(dataPacket)
+        } catch (_: Exception) {
+            // Silently ignore if gateway is inactive
+        }
+
         val decoded = packet.decoded ?: return
         if (decoded.reply_id != 0 && decoded.emoji != 0) {
             rememberReaction(packet)
@@ -316,7 +332,7 @@ class MeshDataHandlerImpl(
             Logger.d {
                 val statusInfo = "status=${p?.status ?: reaction?.status}"
                 "[ackNak] req=$requestId routeErr=$routingError isAck=$isAck " +
-                    "packetId=${p?.id ?: reaction?.packetId} dataId=${p?.id} $statusInfo"
+                        "packetId=${p?.id ?: reaction?.packetId} dataId=${p?.id} $statusInfo"
             }
 
             val m =
@@ -352,25 +368,21 @@ class MeshDataHandlerImpl(
         val toBroadcast = dataPacket.to == DataPacket.ID_BROADCAST
         val contactId = if (fromLocal || toBroadcast) dataPacket.to else dataPacket.from
 
-        // contactKey: unique contact key filter (channel)+(nodeId)
         val contactKey = "${dataPacket.channel}$contactId"
 
         scope.handledLaunch {
             packetRepository.value.apply {
-                // Check for duplicates before inserting
                 val existingPackets = findPacketsWithId(dataPacket.id)
                 if (existingPackets.isNotEmpty()) {
                     Logger.d {
                         "Skipping duplicate packet: packetId=${dataPacket.id} from=${dataPacket.from} " +
-                            "to=${dataPacket.to} contactKey=$contactKey" +
-                            " (already have ${existingPackets.size} packet(s))"
+                                "to=${dataPacket.to} contactKey=$contactKey" +
+                                " (already have ${existingPackets.size} packet(s))"
                     }
                     return@handledLaunch
                 }
 
-                // Check if message should be filtered
                 val isFiltered = shouldFilterMessage(dataPacket, contactKey)
-
 
                 insert(
                     dataPacket,
@@ -394,11 +406,8 @@ class MeshDataHandlerImpl(
 
         if (dataPacket.dataType != PortNum.TEXT_MESSAGE_APP.value) return false
 
-        // Safety net — battlefield messages should already be intercepted in handleTextMessage
-        // but filter them here too just in case
         val text = dataPacket.text.orEmpty()
 
-        // ── UPDATE THIS LINE: Force WIPE and DRONE tags to be swallowed by the database filter ──
         if (text.startsWith("Z:") || text.startsWith("ZX:") || text.startsWith("UT:") || text.startsWith("WIPE:") || text.startsWith("DRONE:")) return true
 
         val isFilteringDisabled = getContactSettings(contactKey).filteringDisabled
@@ -492,32 +501,29 @@ class MeshDataHandlerImpl(
                 snr = packet.rx_snr,
                 rssi = packet.rx_rssi,
                 hopsAway =
-                if (packet.hop_start == 0 || packet.hop_limit > packet.hop_start) {
-                    HOPS_AWAY_UNAVAILABLE
-                } else {
-                    packet.hop_start - packet.hop_limit
-                },
+                    if (packet.hop_start == 0 || packet.hop_limit > packet.hop_start) {
+                        HOPS_AWAY_UNAVAILABLE
+                    } else {
+                        packet.hop_start - packet.hop_limit
+                    },
                 packetId = packet.id,
                 status = MessageStatus.RECEIVED,
                 to = toNode.user.id,
                 channel = packet.channel,
             )
 
-        // Check for duplicates before inserting
         val existingReactions = packetRepository.value.findReactionsWithId(packet.id)
         if (existingReactions.isNotEmpty()) {
             Logger.d {
                 "Skipping duplicate reaction: packetId=${packet.id} replyId=${decoded.reply_id} " +
-                    "from=$fromId emoji=$emoji (already have ${existingReactions.size} reaction(s))"
+                        "from=$fromId emoji=$emoji (already have ${existingReactions.size} reaction(s))"
             }
             return@handledLaunch
         }
 
         packetRepository.value.insertReaction(reaction, nodeManager.myNodeNum.value ?: 0)
 
-        // Find the original packet to get the contactKey
         packetRepository.value.getPacketByPacketId(decoded.reply_id)?.let { originalPacket ->
-            // Skip notification if the original message was filtered
             val targetId =
                 if (originalPacket.from == DataPacket.ID_LOCAL) originalPacket.to else originalPacket.from
             val contactKey = "${originalPacket.channel}$targetId"
