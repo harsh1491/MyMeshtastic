@@ -124,6 +124,8 @@ class FdroidMapViewProvider : MapViewProvider {
         val nodes by mapViewModel.nodes.collectAsStateWithLifecycle()
         val liveDroneTarget by mapViewModel.droneTarget.collectAsStateWithLifecycle() // <-- ADD THIS LINE
 
+        var useOfflineMap by rememberSaveable { mutableStateOf(true) }
+
         // ── Update zones ──
         // ── Update zones and dynamically count units inside them ──
         // ── Update zones and dynamically count units inside them ──
@@ -460,6 +462,55 @@ class FdroidMapViewProvider : MapViewProvider {
             }
         }
 
+        // Reload map style when user switches between offline/online
+        LaunchedEffect(useOfflineMap) {
+            val map = mapLibreMap ?: return@LaunchedEffect
+            val mbtilesFile = listOf(
+                File(context.getExternalFilesDir(null), "india.mbtiles"),
+                File(Environment.getExternalStorageDirectory(), "offline_maps/india.mbtiles"),
+                File(Environment.getExternalStorageDirectory(), "Download/india.mbtiles")
+            ).firstOrNull { it.exists() && it.canRead() }
+
+            val onlineStyleJson = """
+                {
+                  "version": 8,
+                  "sources": {
+                    "osm": {
+                      "type": "raster",
+                      "tiles": ["https://mt0.google.com/vt/lyrs=s&x={x}&y={y}&z={z}", "https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}", "https://mt2.google.com/vt/lyrs=s&x={x}&y={y}&z={z}"],
+                      "maxzoom": 20,
+                      "tileSize": 256,
+                      "attribution": "© Esri, Maxar, Earthstar Geographics"
+                    }
+                  },
+                  "layers": [{
+                    "id": "osm",
+                    "type": "raster",
+                    "source": "osm"
+                  }]
+                }
+            """.trimIndent()
+
+            val styleJson = if (useOfflineMap && mbtilesFile != null) {
+                MapStyleProvider.getOfflineStyleJson(mbtilesFile.absolutePath)
+            } else {
+                if (useOfflineMap && mbtilesFile == null) {
+                    android.widget.Toast.makeText(
+                        context,
+                        "Offline map file not found. Using online map.",
+                        android.widget.Toast.LENGTH_LONG
+                    ).show()
+                }
+                onlineStyleJson
+            }
+
+            styleLoaded = false
+            map.setStyle(Style.Builder().fromJson(styleJson)) { _ ->
+                styleLoaded = true
+                enableLocationComponent(map, context)
+            }
+        }
+
         Box(modifier = modifier.fillMaxSize()) {
 
             AndroidView(
@@ -486,17 +537,16 @@ class FdroidMapViewProvider : MapViewProvider {
                         getMapAsync { map ->
                             mapLibreMap = map
 
-                            val styleJson = if (mbtilesFile != null) {
-                                MapStyleProvider.getOfflineStyleJson(mbtilesFile.absolutePath)
-                            } else {
-                                """
+                            val onlineStyleJson = """
                                 {
                                   "version": 8,
                                   "sources": {
                                     "osm": {
                                       "type": "raster",
-                                      "tiles": ["https://tile.openstreetmap.org/{z}/{x}/{y}.png"],
-                                      "tileSize": 256
+                                      "tiles": ["https://mt0.google.com/vt/lyrs=s&x={x}&y={y}&z={z}", "https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}", "https://mt2.google.com/vt/lyrs=s&x={x}&y={y}&z={z}"],
+                                      "maxzoom": 20,
+                                      "tileSize": 256,
+                                      "attribution": "© Esri, Maxar, Earthstar Geographics"
                                     }
                                   },
                                   "layers": [{
@@ -505,7 +555,19 @@ class FdroidMapViewProvider : MapViewProvider {
                                     "source": "osm"
                                   }]
                                 }
-                                """.trimIndent()
+                            """.trimIndent()
+
+                            val styleJson = if (useOfflineMap && mbtilesFile != null) {
+                                MapStyleProvider.getOfflineStyleJson(mbtilesFile.absolutePath)
+                            } else {
+                                if (useOfflineMap && mbtilesFile == null) {
+                                    android.widget.Toast.makeText(
+                                        context,
+                                        "Offline map file not found. Using online map.",
+                                        android.widget.Toast.LENGTH_LONG
+                                    ).show()
+                                }
+                                onlineStyleJson
                             }
 
                             map.setStyle(Style.Builder().fromJson(styleJson)) { _ ->
@@ -614,6 +676,39 @@ class FdroidMapViewProvider : MapViewProvider {
                 },
                 modifier = Modifier.fillMaxSize()
             )
+
+            // ── Top Right: Offline/Online map toggle ──
+            Row(
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(top = 12.dp, end = 12.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = if (useOfflineMap) "Offline" else "Online",
+                    color = Color.White,
+                    fontSize = 12.sp,
+                    modifier = androidx.compose.ui.Modifier
+                        .background(
+                            color = if (useOfflineMap) Color(0xFF388E3C) else Color(0xFF1976D2),
+                            shape = CircleShape
+                        )
+                        .padding(horizontal = 10.dp, vertical = 4.dp)
+                )
+                FloatingActionButton(
+                    onClick = { useOfflineMap = !useOfflineMap },
+                    shape = CircleShape,
+                    containerColor = Color.White,
+                    modifier = Modifier.size(40.dp)
+                ) {
+                    Text(
+                        text = if (useOfflineMap) "OFF" else "ON",
+                        color = if (useOfflineMap) Color(0xFF388E3C) else Color(0xFF1976D2),
+                        fontSize = 12.sp
+                    )
+                }
+            }
 
             // ── Bottom Right: Zoom + Location buttons ──
             // ── Bottom Right: Zoom + Location buttons ──
@@ -1315,104 +1410,101 @@ class FdroidMapViewProvider : MapViewProvider {
 
 
 
-    @SuppressLint("MissingPermission")
-    private fun enableLocationComponent(map: MapLibreMap, context: android.content.Context) {
-        // We draw our own location marker, so we disable the built-in dot
-        // but still enable the engine to get GPS coordinates
-        val style = map.style ?: return
-        try {
-            val locationComponent = map.locationComponent
-            val options = LocationComponentActivationOptions
-                .builder(context, style)
-                .useDefaultLocationEngine(true)
-                .build()
-            locationComponent.activateLocationComponent(options)
-            locationComponent.isLocationComponentEnabled = false // ← disabled visually
-            locationComponent.cameraMode = CameraMode.NONE
-            locationComponent.renderMode = RenderMode.NORMAL
-        } catch (e: Exception) {
-            android.util.Log.e("MapLibre", "Location component error: ${e.message}")
-        }
+@SuppressLint("MissingPermission")
+private fun enableLocationComponent(map: MapLibreMap, context: android.content.Context) {
+    // We draw our own location marker, so we disable the built-in dot
+    // but still enable the engine to get GPS coordinates
+    val style = map.style ?: return
+    try {
+        val locationComponent = map.locationComponent
+        val options = LocationComponentActivationOptions
+            .builder(context, style)
+            .useDefaultLocationEngine(true)
+            .build()
+        locationComponent.activateLocationComponent(options)
+        locationComponent.isLocationComponentEnabled = false // ← disabled visually
+        locationComponent.cameraMode = CameraMode.NONE
+        locationComponent.renderMode = RenderMode.NORMAL
+    } catch (e: Exception) {
+        android.util.Log.e("MapLibre", "Location component error: ${e.message}")
     }
+}
 
 
-    @SuppressLint("MissingPermission")
-    private fun getPhoneLocation(context: android.content.Context): android.location.Location? {
-        return try {
-            val locationManager = context.getSystemService(
-                android.content.Context.LOCATION_SERVICE
-            ) as android.location.LocationManager
+@SuppressLint("MissingPermission")
+private fun getPhoneLocation(context: android.content.Context): android.location.Location? {
+    return try {
+        val locationManager = context.getSystemService(
+            android.content.Context.LOCATION_SERVICE
+        ) as android.location.LocationManager
 
-            val providers = locationManager.getProviders(true)
-            var bestLocation: android.location.Location? = null
+        val providers = locationManager.getProviders(true)
+        var bestLocation: android.location.Location? = null
 
-            for (provider in providers) {
-                val loc = locationManager.getLastKnownLocation(provider) ?: continue
-                if (bestLocation == null || loc.accuracy < bestLocation.accuracy) {
-                    bestLocation = loc
+        for (provider in providers) {
+            val loc = locationManager.getLastKnownLocation(provider) ?: continue
+            if (bestLocation == null || loc.accuracy < bestLocation.accuracy) {
+                bestLocation = loc
+            }
+        }
+        bestLocation
+    } catch (e: Exception) { null }
+}
+
+
+@SuppressLint("MissingPermission")
+private suspend fun requestFreshLocation(context: android.content.Context): android.location.Location? {
+    return try {
+        val locationManager = context.getSystemService(
+            android.content.Context.LOCATION_SERVICE
+        ) as android.location.LocationManager
+
+        val providers = listOf(
+            android.location.LocationManager.GPS_PROVIDER,
+            android.location.LocationManager.NETWORK_PROVIDER,
+            android.location.LocationManager.FUSED_PROVIDER
+        ).filter {
+            try { locationManager.isProviderEnabled(it) } catch (_: Exception) { false }
+        }
+
+        if (providers.isEmpty()) return getPhoneLocation(context)
+
+        kotlinx.coroutines.withTimeoutOrNull(10000) {
+            kotlinx.coroutines.suspendCancellableCoroutine { cont ->
+                val listener = object : android.location.LocationListener {
+                    override fun onLocationChanged(location: android.location.Location) {
+                        if (cont.isActive) cont.resumeWith(Result.success(location))
+                        try { locationManager.removeUpdates(this) } catch (_: Exception) {}
+                    }
+                    override fun onProviderDisabled(provider: String) {}
+                    override fun onProviderEnabled(provider: String) {}
+                }
+
+                var registered = false
+                for (provider in providers) {
+                    try {
+                        locationManager.requestLocationUpdates(
+                            provider, 0L, 0f, listener,
+                            android.os.Looper.getMainLooper()
+                        )
+                        registered = true
+                        break
+                    } catch (_: Exception) {}
+                }
+
+                if (!registered) {
+                    cont.resumeWith(Result.success(null))
+                    return@suspendCancellableCoroutine
+                }
+
+                cont.invokeOnCancellation {
+                    try { locationManager.removeUpdates(listener) } catch (_: Exception) {}
                 }
             }
-            bestLocation
-        } catch (e: Exception) { null }
+        } ?: getPhoneLocation(context) // fallback to cached if timeout
+
+    } catch (e: Exception) {
+        android.util.Log.e("MarkerFix", "requestFreshLocation error: ${e.message}")
+        getPhoneLocation(context)
     }
-
-
-    @SuppressLint("MissingPermission")
-    private suspend fun requestFreshLocation(context: android.content.Context): android.location.Location? {
-        return try {
-            val locationManager = context.getSystemService(
-                android.content.Context.LOCATION_SERVICE
-            ) as android.location.LocationManager
-
-            val providers = listOf(
-                android.location.LocationManager.GPS_PROVIDER,
-                android.location.LocationManager.NETWORK_PROVIDER,
-                android.location.LocationManager.FUSED_PROVIDER
-            ).filter {
-                try { locationManager.isProviderEnabled(it) } catch (_: Exception) { false }
-            }
-
-            if (providers.isEmpty()) return getPhoneLocation(context)
-
-            kotlinx.coroutines.withTimeoutOrNull(10000) {
-                kotlinx.coroutines.suspendCancellableCoroutine { cont ->
-                    val listener = object : android.location.LocationListener {
-                        override fun onLocationChanged(location: android.location.Location) {
-                            if (cont.isActive) cont.resumeWith(Result.success(location))
-                            try { locationManager.removeUpdates(this) } catch (_: Exception) {}
-                        }
-                        override fun onProviderDisabled(provider: String) {}
-                        override fun onProviderEnabled(provider: String) {}
-                    }
-
-                    var registered = false
-                    for (provider in providers) {
-                        try {
-                            locationManager.requestLocationUpdates(
-                                provider, 0L, 0f, listener,
-                                android.os.Looper.getMainLooper()
-                            )
-                            registered = true
-                            break
-                        } catch (_: Exception) {}
-                    }
-
-                    if (!registered) {
-                        cont.resumeWith(Result.success(null))
-                        return@suspendCancellableCoroutine
-                    }
-
-                    cont.invokeOnCancellation {
-                        try { locationManager.removeUpdates(listener) } catch (_: Exception) {}
-                    }
-                }
-            } ?: getPhoneLocation(context) // fallback to cached if timeout
-
-        } catch (e: Exception) {
-            android.util.Log.e("MarkerFix", "requestFreshLocation error: ${e.message}")
-            getPhoneLocation(context)
-        }
-    }
-
-
-
+}
