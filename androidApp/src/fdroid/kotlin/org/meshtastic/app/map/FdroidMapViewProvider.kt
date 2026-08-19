@@ -31,6 +31,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.layout.width
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.Lifecycle
@@ -60,12 +61,98 @@ import androidx.compose.runtime.rememberCoroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
+import androidx.compose.foundation.clickable
+
 import androidx.compose.material3.OutlinedTextField
 
 import android.location.LocationManager
 import android.content.Context
 
 enum class MapInteractionMode { NONE, DRAW_ZONE, DELETE_ZONE }
+enum class OnlineLayerType { STREET, SATELLITE, TERRAIN, HYBRID }
+
+private fun getOnlineStyleJson(layer: OnlineLayerType): String {
+    return when (layer) {
+        OnlineLayerType.STREET -> """
+            {
+              "version": 8,
+              "sources": {
+                "osm": {
+                  "type": "raster",
+                  "tiles": ["https://tile.openstreetmap.org/{z}/{x}/{y}.png"],
+                  "tileSize": 256,
+                  "attribution": "© OpenStreetMap contributors"
+                }
+              },
+              "layers": [{ "id": "osm", "type": "raster", "source": "osm" }]
+            }
+        """.trimIndent()
+
+        OnlineLayerType.SATELLITE -> """
+            {
+              "version": 8,
+              "sources": {
+                "sat": {
+                  "type": "raster",
+                  "tiles": [
+                    "https://mt0.google.com/vt/lyrs=s&x={x}&y={y}&z={z}",
+                    "https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}",
+                    "https://mt2.google.com/vt/lyrs=s&x={x}&y={y}&z={z}"
+                  ],
+                  "tileSize": 256,
+                  "maxzoom": 20,
+                  "attribution": "© Google"
+                }
+              },
+              "layers": [{ "id": "sat", "type": "raster", "source": "sat" }]
+            }
+        """.trimIndent()
+
+        OnlineLayerType.TERRAIN -> """
+            {
+              "version": 8,
+              "sources": {
+                "terrain": {
+                  "type": "raster",
+                  "tiles": [
+                    "https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}"
+                  ],
+                  "tileSize": 256,
+                  "attribution": "© Esri"
+                }
+              },
+              "layers": [{ "id": "terrain", "type": "raster", "source": "terrain" }]
+            }
+        """.trimIndent()
+
+        OnlineLayerType.HYBRID -> """
+            {
+              "version": 8,
+              "sources": {
+                "sat": {
+                  "type": "raster",
+                  "tiles": [
+                    "https://mt0.google.com/vt/lyrs=s&x={x}&y={y}&z={z}",
+                    "https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}"
+                  ],
+                  "tileSize": 256,
+                  "maxzoom": 20
+                },
+                "roads": {
+                  "type": "raster",
+                  "tiles": ["https://mt0.google.com/vt/lyrs=h&x={x}&y={y}&z={z}"],
+                  "tileSize": 256,
+                  "maxzoom": 20
+                }
+              },
+              "layers": [
+                { "id": "sat", "type": "raster", "source": "sat" },
+                { "id": "roads", "type": "raster", "source": "roads" }
+              ]
+            }
+        """.trimIndent()
+    }
+}
 
 @Single
 class FdroidMapViewProvider : MapViewProvider {
@@ -125,6 +212,8 @@ class FdroidMapViewProvider : MapViewProvider {
         val liveDroneTarget by mapViewModel.droneTarget.collectAsStateWithLifecycle() // <-- ADD THIS LINE
 
         var useOfflineMap by rememberSaveable { mutableStateOf(true) }
+        var onlineLayer by rememberSaveable { mutableStateOf(OnlineLayerType.SATELLITE) }
+        var showLayerPicker by remember { mutableStateOf(false) }
 
         // ── Update zones ──
         // ── Update zones and dynamically count units inside them ──
@@ -463,7 +552,7 @@ class FdroidMapViewProvider : MapViewProvider {
         }
 
         // Reload map style when user switches between offline/online
-        LaunchedEffect(useOfflineMap) {
+        LaunchedEffect(useOfflineMap, onlineLayer) {
             val map = mapLibreMap ?: return@LaunchedEffect
             val mbtilesFile = listOf(
                 File(context.getExternalFilesDir(null), "india.mbtiles"),
@@ -471,37 +560,17 @@ class FdroidMapViewProvider : MapViewProvider {
                 File(Environment.getExternalStorageDirectory(), "Download/india.mbtiles")
             ).firstOrNull { it.exists() && it.canRead() }
 
-            val onlineStyleJson = """
-                {
-                  "version": 8,
-                  "sources": {
-                    "osm": {
-                      "type": "raster",
-                      "tiles": ["https://mt0.google.com/vt/lyrs=s&x={x}&y={y}&z={z}", "https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}", "https://mt2.google.com/vt/lyrs=s&x={x}&y={y}&z={z}"],
-                      "maxzoom": 20,
-                      "tileSize": 256,
-                      "attribution": "© Esri, Maxar, Earthstar Geographics"
-                    }
-                  },
-                  "layers": [{
-                    "id": "osm",
-                    "type": "raster",
-                    "source": "osm"
-                  }]
-                }
-            """.trimIndent()
-
             val styleJson = if (useOfflineMap && mbtilesFile != null) {
                 MapStyleProvider.getOfflineStyleJson(mbtilesFile.absolutePath)
             } else {
                 if (useOfflineMap && mbtilesFile == null) {
                     android.widget.Toast.makeText(
                         context,
-                        "Offline map file not found. Using online map.",
+                        "Offline map not found. Place india.mbtiles in:\nAndroid/data/com.geeksville.mesh.fdroid.debug/files/",
                         android.widget.Toast.LENGTH_LONG
                     ).show()
                 }
-                onlineStyleJson
+                getOnlineStyleJson(onlineLayer)
             }
 
             styleLoaded = false
@@ -537,37 +606,17 @@ class FdroidMapViewProvider : MapViewProvider {
                         getMapAsync { map ->
                             mapLibreMap = map
 
-                            val onlineStyleJson = """
-                                {
-                                  "version": 8,
-                                  "sources": {
-                                    "osm": {
-                                      "type": "raster",
-                                      "tiles": ["https://mt0.google.com/vt/lyrs=s&x={x}&y={y}&z={z}", "https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}", "https://mt2.google.com/vt/lyrs=s&x={x}&y={y}&z={z}"],
-                                      "maxzoom": 20,
-                                      "tileSize": 256,
-                                      "attribution": "© Esri, Maxar, Earthstar Geographics"
-                                    }
-                                  },
-                                  "layers": [{
-                                    "id": "osm",
-                                    "type": "raster",
-                                    "source": "osm"
-                                  }]
-                                }
-                            """.trimIndent()
-
                             val styleJson = if (useOfflineMap && mbtilesFile != null) {
                                 MapStyleProvider.getOfflineStyleJson(mbtilesFile.absolutePath)
                             } else {
                                 if (useOfflineMap && mbtilesFile == null) {
                                     android.widget.Toast.makeText(
                                         context,
-                                        "Offline map file not found. Using online map.",
+                                        "Offline map not found. Place india.mbtiles in:\nAndroid/data/com.geeksville.mesh.fdroid.debug/files/",
                                         android.widget.Toast.LENGTH_LONG
                                     ).show()
                                 }
-                                onlineStyleJson
+                                getOnlineStyleJson(onlineLayer)
                             }
 
                             map.setStyle(Style.Builder().fromJson(styleJson)) { _ ->
@@ -677,36 +726,112 @@ class FdroidMapViewProvider : MapViewProvider {
                 modifier = Modifier.fillMaxSize()
             )
 
-            // ── Top Right: Offline/Online map toggle ──
-            Row(
+            // ── Top Right: Map mode + Layers button ──
+            Column(
                 modifier = Modifier
                     .align(Alignment.TopEnd)
                     .padding(top = 12.dp, end = 12.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically
+                horizontalAlignment = Alignment.End,
+                verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                Text(
-                    text = if (useOfflineMap) "Offline" else "Online",
-                    color = Color.White,
-                    fontSize = 12.sp,
-                    modifier = androidx.compose.ui.Modifier
-                        .background(
-                            color = if (useOfflineMap) Color(0xFF388E3C) else Color(0xFF1976D2),
-                            shape = CircleShape
-                        )
-                        .padding(horizontal = 10.dp, vertical = 4.dp)
-                )
-                FloatingActionButton(
-                    onClick = { useOfflineMap = !useOfflineMap },
-                    shape = CircleShape,
-                    containerColor = Color.White,
-                    modifier = Modifier.size(40.dp)
+                // Offline / Online toggle
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
+                    // Offline button
                     Text(
-                        text = if (useOfflineMap) "OFF" else "ON",
-                        color = if (useOfflineMap) Color(0xFF388E3C) else Color(0xFF1976D2),
-                        fontSize = 12.sp
+                        text = "Offline",
+                        color = Color.White,
+                        fontSize = 12.sp,
+                        modifier = Modifier
+                            .background(
+                                color = if (useOfflineMap) Color(0xFF388E3C) else Color(0x66388E3C),
+                                shape = CircleShape
+                            )
+                            .padding(horizontal = 12.dp, vertical = 6.dp)
+                            .clickable { useOfflineMap = true }
                     )
+                    // Online button
+                    Text(
+                        text = "Online",
+                        color = Color.White,
+                        fontSize = 12.sp,
+                        modifier = Modifier
+                            .background(
+                                color = if (!useOfflineMap) Color(0xFF1976D2) else Color(0x661976D2),
+                                shape = CircleShape
+                            )
+                            .padding(horizontal = 12.dp, vertical = 6.dp)
+                            .clickable { useOfflineMap = false }
+                    )
+                }
+
+                // Layers button — only visible in online mode
+                if (!useOfflineMap) {
+                    FloatingActionButton(
+                        onClick = { showLayerPicker = !showLayerPicker },
+                        shape = CircleShape,
+                        containerColor = Color(0xFF1976D2),
+                        modifier = Modifier.size(40.dp)
+                    ) {
+                        Text("⊞", fontSize = 18.sp, color = Color.White)
+                    }
+
+                    // Layer picker popup
+                    if (showLayerPicker) {
+                        androidx.compose.material3.Surface(
+                            shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp),
+                            color = Color(0xFF1E1E1E),
+                            tonalElevation = 8.dp,
+                            modifier = Modifier
+                                .width(170.dp)
+                                .padding(end = 4.dp)
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(8.dp),
+                                verticalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Text(
+                                    text = "MAP LAYERS",
+                                    color = Color(0xFF90CAF9),
+                                    fontSize = 10.sp,
+                                    fontWeight = androidx.compose.ui.text.font.FontWeight.Bold,
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                )
+                                listOf(
+                                    OnlineLayerType.STREET to "🗺 Street",
+                                    OnlineLayerType.SATELLITE to "🛰 Satellite",
+                                    OnlineLayerType.TERRAIN to "⛰ Terrain",
+                                    OnlineLayerType.HYBRID to "🔀 Hybrid",
+                                ).forEach { (type, label) ->
+                                    val isSelected = onlineLayer == type
+                                    TextButton(
+                                        onClick = {
+                                            onlineLayer = type
+                                            showLayerPicker = false
+                                        },
+                                        modifier = Modifier.width(160.dp)
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.width(160.dp),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Text(
+                                                text = label,
+                                                color = if (isSelected) Color(0xFF90CAF9) else Color.White,
+                                                fontSize = 13.sp
+                                            )
+                                            if (isSelected) {
+                                                Text("✓", color = Color(0xFF90CAF9), fontSize = 13.sp)
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
             }
 
