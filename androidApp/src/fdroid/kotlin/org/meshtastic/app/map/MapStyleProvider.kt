@@ -122,4 +122,103 @@ object MapStyleProvider {
         }
         """.trimIndent()
     }
+
+
+    fun getSatelliteOfflineStyleJson(satellitePath: String, vectorPath: String? = null): String {
+        val vectorSource = if (vectorPath != null) {
+            """
+        ,"openmaptiles": {
+          "type": "vector",
+          "url": "mbtiles://$vectorPath"
+        }
+        """
+        } else ""
+
+        val overlayLayers = if (vectorPath != null) {
+            """
+        ,
+        {
+          "id": "roads-casing",
+          "type": "line",
+          "source": "openmaptiles",
+          "source-layer": "transportation",
+          "paint": { "line-color": "#000000", "line-width": 3, "line-opacity": 0.4 }
+        },
+        {
+          "id": "roads-main",
+          "type": "line",
+          "source": "openmaptiles",
+          "source-layer": "transportation",
+          "filter": ["in", "class", "primary", "secondary", "tertiary", "trunk", "motorway"],
+          "paint": { "line-color": "#FFD54F", "line-width": 1.8 }
+        },
+        {
+          "id": "boundary",
+          "type": "line",
+          "source": "openmaptiles",
+          "source-layer": "boundary",
+          "paint": { "line-color": "#E040FB", "line-width": 1.2, "line-dasharray": [3, 2] }
+        },
+        {
+          "id": "road-labels",
+          "type": "symbol",
+          "source": "openmaptiles",
+          "source-layer": "transportation_name",
+          "layout": {
+            "text-field": "{name}",
+            "text-font": ["Open Sans Regular"],
+            "text-size": 11,
+            "symbol-placement": "line"
+          },
+          "paint": {
+            "text-color": "#FFFFFF",
+            "text-halo-color": "#000000",
+            "text-halo-width": 2
+          }
+        },
+        {
+          "id": "place-labels",
+          "type": "symbol",
+          "source": "openmaptiles",
+          "source-layer": "place",
+          "layout": {
+            "text-field": "{name}",
+            "text-font": ["Open Sans Regular"],
+            "text-size": 13,
+            "text-max-width": 8
+          },
+          "paint": {
+            "text-color": "#FFFFFF",
+            "text-halo-color": "#000000",
+            "text-halo-width": 2
+          }
+        }
+        """
+        } else ""
+
+        return """
+    {
+      "version": 8,
+      "sources": {
+        "satellite": {
+          "type": "raster",
+          "url": "mbtiles://$satellitePath",
+          "tileSize": 256
+        }
+        $vectorSource
+      },
+      "glyphs": "asset://fonts/{fontstack}/{range}.pbf",
+      "layers": [
+        {
+          "id": "satellite",
+          "type": "raster",
+          "source": "satellite"
+        }
+        $overlayLayers
+      ]
+    }
+    """.trimIndent()
+    }
+
+
 }

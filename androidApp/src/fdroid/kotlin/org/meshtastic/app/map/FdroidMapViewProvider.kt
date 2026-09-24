@@ -154,6 +154,20 @@ private fun getOnlineStyleJson(layer: OnlineLayerType): String {
     }
 }
 
+// ── PUT isValidMbTiles HERE (TOP LEVEL) ──
+private fun isValidMbTiles(file: File?): Boolean {
+    if (file == null || !file.exists() || file.length() < 100) return false
+    return try {
+        file.inputStream().use { stream ->
+            val header = ByteArray(16)
+            val bytesRead = stream.read(header)
+            bytesRead == 16 && String(header, Charsets.US_ASCII).startsWith("SQLite format 3")
+        }
+    } catch (_: Exception) {
+        false
+    }
+}
+
 @Single
 class FdroidMapViewProvider : MapViewProvider {
     @Composable
@@ -213,6 +227,7 @@ class FdroidMapViewProvider : MapViewProvider {
 
         var useOfflineMap by rememberSaveable { mutableStateOf(true) }
         var onlineLayer by rememberSaveable { mutableStateOf(OnlineLayerType.SATELLITE) }
+        var offlineLayerIsSatellite by rememberSaveable { mutableStateOf(false) }
         var showLayerPicker by remember { mutableStateOf(false) }
 
         // ── Update zones ──
@@ -552,7 +567,8 @@ class FdroidMapViewProvider : MapViewProvider {
         }
 
         // Reload map style when user switches between offline/online
-        LaunchedEffect(useOfflineMap, onlineLayer) {
+        // ✅ REPLACEMENT:
+        LaunchedEffect(useOfflineMap, onlineLayer, offlineLayerIsSatellite) {
             val map = mapLibreMap ?: return@LaunchedEffect
             val mbtilesFile = listOf(
                 File(context.getExternalFilesDir(null), "india.mbtiles"),
@@ -560,16 +576,48 @@ class FdroidMapViewProvider : MapViewProvider {
                 File(Environment.getExternalStorageDirectory(), "Download/india.mbtiles")
             ).firstOrNull { it.exists() && it.canRead() }
 
-            val styleJson = if (useOfflineMap && mbtilesFile != null) {
-                MapStyleProvider.getOfflineStyleJson(mbtilesFile.absolutePath)
-            } else {
-                if (useOfflineMap && mbtilesFile == null) {
+            val satelliteFile = listOf(
+                File(context.getExternalFilesDir(null), "india_satellite.mbtiles"),
+                File(Environment.getExternalStorageDirectory(), "offline_maps/india_satellite.mbtiles"),
+                File(Environment.getExternalStorageDirectory(), "Download/india_satellite.mbtiles")
+            ).firstOrNull { it.exists() && it.canRead() }
+
+            // Validate SQLite headers before handing paths to native MapLibre
+            val isSatValid = isValidMbTiles(satelliteFile)
+            val isStreetValid = isValidMbTiles(mbtilesFile)
+
+            val styleJson = if (useOfflineMap) {
+                if (offlineLayerIsSatellite) {
+                    if (satelliteFile != null && isSatValid) {
+                        MapStyleProvider.getSatelliteOfflineStyleJson(
+                            satellitePath = satelliteFile.absolutePath,
+                            vectorPath = if (isStreetValid) mbtilesFile?.absolutePath else null
+                        )
+                    } else {
+                        val errorMsg = if (satelliteFile == null) {
+                            "Offline satellite file not found."
+                        } else {
+                            "india_satellite.mbtiles is corrupt or not a valid SQLite database."
+                        }
+                        android.widget.Toast.makeText(context, "$errorMsg Falling back to Street view.", android.widget.Toast.LENGTH_LONG).show()
+
+                        if (mbtilesFile != null && isStreetValid) {
+                            MapStyleProvider.getOfflineStyleJson(mbtilesFile.absolutePath)
+                        } else {
+                            getOnlineStyleJson(OnlineLayerType.STREET)
+                        }
+                    }
+                } else if (mbtilesFile != null && isStreetValid) {
+                    MapStyleProvider.getOfflineStyleJson(mbtilesFile.absolutePath)
+                } else {
                     android.widget.Toast.makeText(
                         context,
-                        "Offline map not found. Place india.mbtiles in:\nAndroid/data/com.geeksville.mesh.fdroid.debug/files/",
+                        "Offline map not found or corrupted. Falling back to online.",
                         android.widget.Toast.LENGTH_LONG
                     ).show()
+                    getOnlineStyleJson(OnlineLayerType.STREET)
                 }
+            } else {
                 getOnlineStyleJson(onlineLayer)
             }
 
@@ -579,7 +627,6 @@ class FdroidMapViewProvider : MapViewProvider {
                 enableLocationComponent(map, context)
             }
         }
-
         Box(modifier = modifier.fillMaxSize()) {
 
             AndroidView(
@@ -606,16 +653,39 @@ class FdroidMapViewProvider : MapViewProvider {
                         getMapAsync { map ->
                             mapLibreMap = map
 
-                            val styleJson = if (useOfflineMap && mbtilesFile != null) {
-                                MapStyleProvider.getOfflineStyleJson(mbtilesFile.absolutePath)
-                            } else {
-                                if (useOfflineMap && mbtilesFile == null) {
-                                    android.widget.Toast.makeText(
-                                        context,
-                                        "Offline map not found. Place india.mbtiles in:\nAndroid/data/com.geeksville.mesh.fdroid.debug/files/",
-                                        android.widget.Toast.LENGTH_LONG
-                                    ).show()
+                            // ✅ REPLACEMENT INSIDE getMapAsync:
+                            val satelliteFile = listOf(
+                                File(context.getExternalFilesDir(null), "india_satellite.mbtiles"),
+                                File(Environment.getExternalStorageDirectory(), "offline_maps/india_satellite.mbtiles"),
+                                File(Environment.getExternalStorageDirectory(), "Download/india_satellite.mbtiles")
+                            ).firstOrNull { it.exists() && it.canRead() }
+
+                            val isSatValid = isValidMbTiles(satelliteFile)
+                            val isStreetValid = isValidMbTiles(mbtilesFile)
+
+                            val styleJson = if (useOfflineMap) {
+                                if (offlineLayerIsSatellite) {
+                                    if (satelliteFile != null && isSatValid) {
+                                        MapStyleProvider.getSatelliteOfflineStyleJson(
+                                            satellitePath = satelliteFile.absolutePath,
+                                            vectorPath = if (isStreetValid) mbtilesFile?.absolutePath else null
+                                        )
+                                    } else {
+                                        if (satelliteFile != null && !isSatValid) {
+                                            android.widget.Toast.makeText(context, "india_satellite.mbtiles is corrupt or not a valid SQLite database.", android.widget.Toast.LENGTH_LONG).show()
+                                        }
+                                        if (mbtilesFile != null && isStreetValid) {
+                                            MapStyleProvider.getOfflineStyleJson(mbtilesFile.absolutePath)
+                                        } else {
+                                            getOnlineStyleJson(OnlineLayerType.STREET)
+                                        }
+                                    }
+                                } else if (mbtilesFile != null && isStreetValid) {
+                                    MapStyleProvider.getOfflineStyleJson(mbtilesFile.absolutePath)
+                                } else {
+                                    getOnlineStyleJson(OnlineLayerType.STREET)
                                 }
+                            } else {
                                 getOnlineStyleJson(onlineLayer)
                             }
 
@@ -767,8 +837,8 @@ class FdroidMapViewProvider : MapViewProvider {
                     )
                 }
 
-                // Layers button — only visible in online mode
-                if (!useOfflineMap) {
+                // Layers button — visible in both modes
+                if (true) {
                     FloatingActionButton(
                         onClick = { showLayerPicker = !showLayerPicker },
                         shape = CircleShape,
@@ -799,32 +869,66 @@ class FdroidMapViewProvider : MapViewProvider {
                                     fontWeight = androidx.compose.ui.text.font.FontWeight.Bold,
                                     modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
                                 )
-                                listOf(
-                                    OnlineLayerType.STREET to "🗺 Street",
-                                    OnlineLayerType.SATELLITE to "🛰 Satellite",
-                                    OnlineLayerType.TERRAIN to "⛰ Terrain",
-                                    OnlineLayerType.HYBRID to "🔀 Hybrid",
-                                ).forEach { (type, label) ->
-                                    val isSelected = onlineLayer == type
-                                    TextButton(
-                                        onClick = {
-                                            onlineLayer = type
-                                            showLayerPicker = false
-                                        },
-                                        modifier = Modifier.width(160.dp)
-                                    ) {
-                                        Row(
-                                            modifier = Modifier.width(160.dp),
-                                            horizontalArrangement = Arrangement.SpaceBetween,
-                                            verticalAlignment = Alignment.CenterVertically
+
+                                if (useOfflineMap) {
+                                    // Offline layer options
+                                    listOf(
+                                        false to "🗺 Street",
+                                        true to "🛰 Satellite",
+                                    ).forEach { (isSat, label) ->
+                                        val isSelected = offlineLayerIsSatellite == isSat
+                                        TextButton(
+                                            onClick = {
+                                                offlineLayerIsSatellite = isSat
+                                                showLayerPicker = false
+                                            },
+                                            modifier = Modifier.width(160.dp)
                                         ) {
-                                            Text(
-                                                text = label,
-                                                color = if (isSelected) Color(0xFF90CAF9) else Color.White,
-                                                fontSize = 13.sp
-                                            )
-                                            if (isSelected) {
-                                                Text("✓", color = Color(0xFF90CAF9), fontSize = 13.sp)
+                                            Row(
+                                                modifier = Modifier.width(160.dp),
+                                                horizontalArrangement = Arrangement.SpaceBetween,
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Text(
+                                                    text = label,
+                                                    color = if (isSelected) Color(0xFF90CAF9) else Color.White,
+                                                    fontSize = 13.sp
+                                                )
+                                                if (isSelected) {
+                                                    Text("✓", color = Color(0xFF90CAF9), fontSize = 13.sp)
+                                                }
+                                            }
+                                        }
+                                    }
+                                } else {
+                                    // Online layer options
+                                    listOf(
+                                        OnlineLayerType.STREET to "🗺 Street",
+                                        OnlineLayerType.SATELLITE to "🛰 Satellite",
+                                        OnlineLayerType.TERRAIN to "⛰ Terrain",
+                                        OnlineLayerType.HYBRID to "🔀 Hybrid",
+                                    ).forEach { (type, label) ->
+                                        val isSelected = onlineLayer == type
+                                        TextButton(
+                                            onClick = {
+                                                onlineLayer = type
+                                                showLayerPicker = false
+                                            },
+                                            modifier = Modifier.width(160.dp)
+                                        ) {
+                                            Row(
+                                                modifier = Modifier.width(160.dp),
+                                                horizontalArrangement = Arrangement.SpaceBetween,
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Text(
+                                                    text = label,
+                                                    color = if (isSelected) Color(0xFF90CAF9) else Color.White,
+                                                    fontSize = 13.sp
+                                                )
+                                                if (isSelected) {
+                                                    Text("✓", color = Color(0xFF90CAF9), fontSize = 13.sp)
+                                                }
                                             }
                                         }
                                     }
@@ -1632,4 +1736,20 @@ private suspend fun requestFreshLocation(context: android.content.Context): andr
         android.util.Log.e("MarkerFix", "requestFreshLocation error: ${e.message}")
         getPhoneLocation(context)
     }
+
+
+//    private fun isValidMbTiles(file: File?): Boolean {
+//        if (file == null || !file.exists() || file.length() < 100) return false
+//        return try {
+//            file.inputStream().use { stream ->
+//                val header = ByteArray(16)
+//                val bytesRead = stream.read(header)
+//                bytesRead == 16 && String(header, Charsets.US_ASCII).startsWith("SQLite format 3")
+//            }
+//        } catch (_: Exception) {
+//            false
+//        }
+//    }
+
+
 }
