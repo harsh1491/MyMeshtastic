@@ -21,6 +21,8 @@ import org.meshtastic.proto.LocalConfig
 import org.meshtastic.app.battlefield.BattlefieldViewModel
 import org.meshtastic.app.battlefield.UnitType
 
+import kotlinx.coroutines.delay
+
 @Suppress("LongParameterList")
 @KoinViewModel
 class MapViewModel(
@@ -110,6 +112,53 @@ class MapViewModel(
     }
 
     init {
+
+
+
+        // ── DEMO INJECTION: POPULATE NODES TAB WITH REAL TELEMETRY ──
+        if (org.meshtastic.app.demo.DemoSimulationEngine.DEMO_ENABLED) {
+            safeLaunch(context = ioDispatcher, tag = "demoNodeInjector") {
+                delay(1500)
+                val nowSec = (System.currentTimeMillis() / 1000).toInt()
+                val baseLat = org.meshtastic.app.demo.DemoSimulationEngine.BASE_LAT
+                val baseLon = org.meshtastic.app.demo.DemoSimulationEngine.BASE_LON
+
+                val demoNodes = listOf(
+                    createDemoNode(10101, "commander", "CMD", baseLat, baseLon, 1170, 98, 4.18f, 9.8f, nowSec + 100),
+                    createDemoNode(10102, "detector-1", "DET1", baseLat + 0.0004, baseLon - 0.0024, 1168, 89, 4.05f, 8.5f, nowSec + 80),
+                    createDemoNode(10103, "detector-2", "DET2", baseLat - 0.0003, baseLon + 0.0024, 1172, 91, 4.08f, 8.2f, nowSec + 60),
+                    createDemoNode(10104, "drone1", "DRN1", baseLat + 0.0008, baseLon - 0.0020, 1250, 84, 3.95f, 7.4f, nowSec + 40),
+                    createDemoNode(10105, "drone2", "DRN2", baseLat - 0.0006, baseLon - 0.0022, 1280, 78, 3.86f, 7.1f, nowSec + 20)
+                )
+
+                val nodeManager: org.meshtastic.core.repository.NodeManager =
+                    org.koin.core.context.GlobalContext.get().get()
+
+                val mutableNodeDb = nodeManager.nodeDBbyNodeNum as? MutableMap<Int, org.meshtastic.core.model.Node>
+                val mutableIdDb = nodeManager.nodeDBbyID as? MutableMap<String, org.meshtastic.core.model.Node>
+
+                demoNodes.forEach { node ->
+                    mutableNodeDb?.put(node.num, node)
+                    node.user?.id?.let { id -> mutableIdDb?.put(id, node) }
+
+                    // 1. Register User Profile
+                    node.user?.let { user ->
+                        try { nodeManager.handleReceivedUser(node.num, user, 0) } catch (_: Exception) {}
+                    }
+
+                    // 2. Register Position & Altitude in Database (Fixes 'Unknown' & Missing MSL)
+                    node.position?.let { pos ->
+                        try {
+                            nodeManager.handleReceivedPosition(node.num, 0, pos, (node.lastHeard ?: nowSec).toLong())
+                        } catch (_: Exception) {}
+                    }
+                }
+            }
+        }
+
+
+
+
         // ── 5-Second Inactivity Timeout Sweeper (Drones + RF Threat Zones) ──
         safeLaunch(context = ioDispatcher, tag = "threatTimeoutSweeper") {
             while (true) {
@@ -206,6 +255,51 @@ class MapViewModel(
             }
         }
     }
+
+
+
+    private fun createDemoNode(
+        num: Int,
+        name: String,
+        shortName: String,
+        lat: Double,
+        lon: Double,
+        alt: Int,
+        battery: Int,
+        voltage: Float,
+        snrVal: Float,
+        lastHeardTimestamp: Int
+    ): org.meshtastic.core.model.Node {
+        return org.meshtastic.core.model.Node(
+            num = num,
+            user = org.meshtastic.proto.User(
+                id = "!${num.toString(16)}",
+                long_name = name,
+                short_name = shortName,
+                hw_model = org.meshtastic.proto.HardwareModel.THINKNODE_M5,
+                role = org.meshtastic.proto.Config.DeviceConfig.Role.CLIENT
+            ),
+            position = org.meshtastic.proto.Position(
+                latitude_i = (lat * 1e7).toInt(),
+                longitude_i = (lon * 1e7).toInt(),
+                altitude = alt,
+                time = lastHeardTimestamp
+            ),
+            deviceMetrics = org.meshtastic.proto.DeviceMetrics(
+                battery_level = battery,
+                voltage = voltage,
+                channel_utilization = 1.4f,
+                air_util_tx = 0.1f
+            ),
+            lastHeard = lastHeardTimestamp,
+            snr = snrVal,
+            isFavorite = true // Pins directly to the top with a gold star ⭐
+        )
+    }
+
+
+
+
 
     // ── Parser for Incoming Compact RF Threat Payloads ──
     private fun parseAndApplyMeshRfThreat(text: String) {

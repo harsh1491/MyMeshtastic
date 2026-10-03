@@ -91,6 +91,39 @@ import org.meshtastic.core.ui.icon.MeshtasticIcons
 import org.meshtastic.core.ui.icon.Notes
 import org.meshtastic.proto.Config
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.runtime.mutableStateMapOf
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.sp
+
+
+// ── In-Memory Active / Passive State for Demo Nodes ──
+private val demoNodeModeState = mutableStateMapOf(
+    10101 to true,  // commander -> Passive (true) / Active (false)
+    10102 to true,  // detector-1
+    10103 to true,  // detector-2
+    10104 to true,  // drone1
+    10105 to false  // drone2
+)
+
+private fun isDemoNode(num: Int, name: String): Boolean {
+    return (num in 10101..10105) || name in listOf("commander", "detector-1", "detector-2", "drone1", "drone2")
+}
+
+private fun getDemoSpeed(num: Int, name: String): String {
+    return when {
+        num == 10104 || name == "drone1" -> "38.4 km/h"
+        num == 10105 || name == "drone2" -> "42.1 km/h"
+        num == 10101 || name == "commander" -> "0.0 km/h"
+        num == 10102 || name == "detector-1" -> "0.0 km/h"
+        num == 10103 || name == "detector-2" -> "0.0 km/h"
+        else -> ""
+    }
+}
+
 private const val ACTIVE_ALPHA = 0.5f
 private const val INACTIVE_ALPHA = 0.2f
 private const val GRID_COLUMNS = 3
@@ -109,10 +142,68 @@ fun NodeItem(
     deviceType: DeviceType? = null,
     isActive: Boolean = false,
 ) {
+
+
+
+    val isDemo = isDemoNode(thatNode.num, thatNode.user.long_name)
+    val nowSec = (System.currentTimeMillis() / 1000).toInt()
+
+    // ── Enriches Demo Nodes so they show 100% complete metrics like real nodes ──
+    val effectiveNode = if (isDemo) {
+        val defaultAlt = when (thatNode.num) {
+            10101 -> 1170
+            10102 -> 1168
+            10103 -> 1172
+            10104 -> 1250
+            10105 -> 1280
+            else -> 1170
+        }
+        val defaultBatt = when (thatNode.num) {
+            10101 -> 98
+            10102 -> 89
+            10103 -> 91
+            10104 -> 84
+            10105 -> 78
+            else -> 85
+        }
+        val defaultVolt = when (thatNode.num) {
+            10101 -> 4.18f
+            10102 -> 4.05f
+            10103 -> 4.08f
+            10104 -> 3.95f
+            10105 -> 3.86f
+            else -> 4.0f
+        }
+        val defaultSnr = when (thatNode.num) {
+            10101 -> 9.8f
+            10102 -> 8.5f
+            10103 -> 8.2f
+            10104 -> 7.4f
+            10105 -> 7.1f
+            else -> 8.0f
+        }
+        thatNode.copy(
+            lastHeard = thatNode.lastHeard?.takeIf { it > 0 } ?: nowSec,
+            snr = if (thatNode.snr != 0f && thatNode.snr < 100f) thatNode.snr else defaultSnr,
+            deviceMetrics = thatNode.deviceMetrics.copy(
+                battery_level = thatNode.deviceMetrics.battery_level?.takeIf { it > 0 } ?: defaultBatt,
+                voltage = thatNode.deviceMetrics.voltage?.takeIf { it > 0f } ?: defaultVolt
+            ),
+            position = thatNode.position?.copy(
+                altitude = thatNode.position?.altitude?.takeIf { it != 0 } ?: defaultAlt
+            ) ?: org.meshtastic.proto.Position(altitude = defaultAlt)
+        )
+    } else {
+        thatNode
+    }
+
+
+
+
     val originalLongName = thatNode.user.long_name.ifEmpty { stringResource(Res.string.unknown_username) }
     val isMuted = remember(thatNode) { thatNode.isMuted }
     val isIgnored = thatNode.isIgnored
-    val isFavorite = thatNode.isFavorite
+    val isFavorite = if (isDemo) true else thatNode.isFavorite
 
     val isThisNode = remember(thatNode) { thisNode?.num == thatNode.num }
     val system =
@@ -153,12 +244,15 @@ fun NodeItem(
 
     Card(modifier = modifier.fillMaxWidth(), colors = cardColors) {
         Column(
-            modifier =
-            Modifier.combinedClickable(onClick = onClick, onLongClick = onLongClick).fillMaxWidth().padding(12.dp),
+            modifier = Modifier
+                .combinedClickable(onClick = onClick, onLongClick = onLongClick)
+                .fillMaxWidth()
+                .padding(12.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
+            // ✅ Pass effectiveNode here
             NodeItemHeader(
-                thatNode = thatNode,
+                thatNode = effectiveNode,
                 isThisNode = isThisNode,
                 longName = originalLongName,
                 style = style,
@@ -171,7 +265,7 @@ fun NodeItem(
                 contentColor = contentColor,
             )
 
-            thatNode.nodeStatus?.let { status ->
+            effectiveNode.nodeStatus?.let { status ->
                 Row(
                     modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -193,21 +287,74 @@ fun NodeItem(
                 }
             }
 
+            // ✅ Pass effectiveNode here (Unlocks 98% 4.18V and Altitude MSL)
             NodeBatteryPositionRow(
-                thatNode = thatNode,
+                thatNode = effectiveNode,
                 distance = distance,
                 system = system,
                 contentColor = contentColor,
             )
 
-            NodeSignalRow(thatNode = thatNode, isThisNode = isThisNode, contentColor = contentColor)
+            // ✅ Pass effectiveNode here (Unlocks SNR 9.80 dB)
+            NodeSignalRow(thatNode = effectiveNode, isThisNode = isThisNode, contentColor = contentColor)
 
-            val sensorItems = gatherSensors(thatNode, tempInFahrenheit, contentColor)
+            val sensorItems = gatherSensors(effectiveNode, tempInFahrenheit, contentColor)
             if (sensorItems.isNotEmpty()) {
                 MetricsGrid(sensorItems)
             }
 
-            NodeItemFooter(thatNode = thatNode, contentColor = contentColor)
+            // ✅ Pass effectiveNode here
+            NodeItemFooter(thatNode = effectiveNode, contentColor = contentColor)
+
+            // ── 4th UPDATE: Active / Passive Toggle Button ──
+            if (isDemo) {
+                val isPassive = demoNodeModeState[effectiveNode.num] ?: true
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 4.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .background(
+                                color = if (isPassive) Color(0x33FF9800) else Color(0x334CAF50),
+                                shape = RoundedCornerShape(4.dp)
+                            )
+                            .padding(horizontal = 8.dp, vertical = 4.dp)
+                    ) {
+                        Text(
+                            text = if (isPassive) "• PASSIVE (STEALTH)" else "• ACTIVE TRANSMIT",
+                            color = if (isPassive) Color(0xFFFF9800) else Color(0xFF4CAF50),
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                        )
+                    }
+
+                    Button(
+                        onClick = {
+                            val current = demoNodeModeState[effectiveNode.num] ?: true
+                            demoNodeModeState[effectiveNode.num] = !current
+                        },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = if (isPassive) Color(0xFF1976D2) else Color(0xFFE65100)
+                        ),
+                        shape = RoundedCornerShape(4.dp),
+                        contentPadding = androidx.compose.foundation.layout.PaddingValues(
+                            horizontal = 12.dp,
+                            vertical = 4.dp
+                        ),
+                    ) {
+                        Text(
+                            text = if (isPassive) "Switch to Active mode" else "Switch to Passive mode",
+                            color = Color.White,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                        )
+                    }
+                }
+            }
         }
     }
 }
@@ -240,6 +387,19 @@ private fun NodeBatteryPositionRow(
                     system = system,
                     suffix = stringResource(Res.string.elevation_suffix),
                     contentColor = contentColor,
+                )
+            }
+
+            // ═══════════════════════════════════════════════════════════
+            // ── ADD THIS: SPEED INDICATOR ──
+            // ═══════════════════════════════════════════════════════════
+            val speedStr = getDemoSpeed(thatNode.num, thatNode.user.long_name)
+            if (speedStr.isNotEmpty()) {
+                Text(
+                    text = "Spd: $speedStr",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = contentColor,
+                    fontWeight = FontWeight.SemiBold,
                 )
             }
         }

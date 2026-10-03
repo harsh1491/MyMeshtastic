@@ -232,6 +232,203 @@ class FdroidMapViewProvider : MapViewProvider {
         var offlineLayerIsSatellite by rememberSaveable { mutableStateOf(false) }
         var showLayerPicker by remember { mutableStateOf(false) }
 
+
+
+        // Demo Engine Observers
+        val isDemoActive = org.meshtastic.app.demo.DemoSimulationEngine.DEMO_ENABLED
+        val demoTotalDrones by org.meshtastic.app.demo.DemoSimulationEngine.totalDrones.collectAsStateWithLifecycle()
+        val demoFriendDrones by org.meshtastic.app.demo.DemoSimulationEngine.friendDrones.collectAsStateWithLifecycle()
+        val demoEnemyDrones by org.meshtastic.app.demo.DemoSimulationEngine.enemyDrones.collectAsStateWithLifecycle()
+        val demoDrones by org.meshtastic.app.demo.DemoSimulationEngine.activeDrones.collectAsStateWithLifecycle()
+        val demoThreatZone by org.meshtastic.app.demo.DemoSimulationEngine.demoRfThreatZone.collectAsStateWithLifecycle()
+
+// Selected drone for inspection card
+        var inspectedDrone by remember { mutableStateOf<org.meshtastic.app.demo.SimulatedDrone?>(null) }
+
+        // ══════════════════════════════════════════════════════════════════
+// ── PART 2: Start Demo Simulation Engine on Map Load ──
+// ══════════════════════════════════════════════════════════════════
+        LaunchedEffect(styleLoaded) {
+            if (styleLoaded && isDemoActive) {
+                val map = mapLibreMap
+                // Pan directly to the exact Base Station position at tactical zoom 15.5
+                map?.moveCamera(
+                    org.maplibre.android.camera.CameraUpdateFactory.newLatLngZoom(
+                        org.maplibre.android.geometry.LatLng(
+                            org.meshtastic.app.demo.DemoSimulationEngine.BASE_LAT,
+                            org.meshtastic.app.demo.DemoSimulationEngine.BASE_LON
+                        ), 15.5
+                    )
+                )
+                org.meshtastic.app.demo.DemoSimulationEngine.startSimulation()
+            }
+        }
+
+
+        val demoDroneMarkers = remember { mutableMapOf<String, org.maplibre.android.annotations.Marker>() }
+        val demoStationMarkers = remember { mutableMapOf<String, org.maplibre.android.annotations.Marker>() }
+
+        // ── 1. Render Base Station, Detector-1, and Detector-2 With Text Labels ──
+        LaunchedEffect(styleLoaded, mapLibreMap) {
+            if (!styleLoaded || !isDemoActive) return@LaunchedEffect
+            val map = mapLibreMap ?: return@LaunchedEffect
+
+            org.meshtastic.app.demo.DemoSimulationEngine.stations.forEach { stn ->
+                if (!demoStationMarkers.containsKey(stn.id)) {
+                    val density = context.resources.displayMetrics.density
+                    val widthPx = (96 * density).toInt()
+                    val heightPx = (52 * density).toInt()
+
+                    val bitmap = android.graphics.Bitmap.createBitmap(widthPx, heightPx, android.graphics.Bitmap.Config.ARGB_8888)
+                    val canvas = android.graphics.Canvas(bitmap)
+
+                    val badgeColor = when (stn.type) {
+                        org.meshtastic.app.demo.StationType.COMMANDER -> android.graphics.Color.parseColor("#4CAF50") // Tactical Green
+                        org.meshtastic.app.demo.StationType.DETECTOR_DJI -> android.graphics.Color.parseColor("#00B0FF") // Cyan Blue
+                        org.meshtastic.app.demo.StationType.DETECTOR_RF -> android.graphics.Color.parseColor("#FF9800") // Amber Orange
+                    }
+
+                    // Draw Label Pill (Name above pin)
+                    val pillPaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+                        color = android.graphics.Color.parseColor("#DD0F1713")
+                        style = android.graphics.Paint.Style.FILL
+                    }
+                    val strokePaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+                        color = badgeColor
+                        style = android.graphics.Paint.Style.STROKE
+                        strokeWidth = 2.5f * density
+                    }
+                    val rect = android.graphics.RectF(4f * density, 2f * density, (widthPx - 4 * density), 22f * density)
+                    canvas.drawRoundRect(rect, 4f * density, 4f * density, pillPaint)
+                    canvas.drawRoundRect(rect, 4f * density, 4f * density, strokePaint)
+
+                    // Draw Station Name Text
+                    val textPaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+                        color = android.graphics.Color.WHITE
+                        textSize = 10f * density
+                        typeface = android.graphics.Typeface.DEFAULT_BOLD
+                        textAlign = android.graphics.Paint.Align.CENTER
+                    }
+                    canvas.drawText(stn.label, widthPx / 2f, 16f * density, textPaint)
+
+                    // Draw Station Pin Icon below the text pill
+                    val pinCenterX = widthPx / 2f
+                    val pinCenterY = 36f * density
+                    val pinRadius = 11f * density
+
+                    val pinBg = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+                        color = android.graphics.Color.WHITE
+                        style = android.graphics.Paint.Style.FILL
+                    }
+                    canvas.drawCircle(pinCenterX, pinCenterY, pinRadius, pinBg)
+                    canvas.drawCircle(pinCenterX, pinCenterY, pinRadius, strokePaint)
+
+                    // Pin Center Dot
+                    val centerDot = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+                        color = badgeColor
+                        style = android.graphics.Paint.Style.FILL
+                    }
+                    canvas.drawCircle(pinCenterX, pinCenterY, 5f * density, centerDot)
+
+                    val icon = org.maplibre.android.annotations.IconFactory.getInstance(context).fromBitmap(bitmap)
+                    val marker = map.addMarker(
+                        org.maplibre.android.annotations.MarkerOptions()
+                            .position(org.maplibre.android.geometry.LatLng(stn.lat, stn.lon))
+                            .title(stn.label)
+                            .snippet("STATION:${stn.id}")
+                            .icon(icon)
+                    )
+                    demoStationMarkers[stn.id] = marker
+                }
+            }
+        }
+
+// ── 2. Render Drones with WHITE Backgrounds ──
+        // ── Render Drones & Auto-Remove Stale Markers on Restart ──
+        LaunchedEffect(demoDrones, styleLoaded, mapLibreMap) {
+            if (!styleLoaded || !isDemoActive) return@LaunchedEffect
+            val map = mapLibreMap ?: return@LaunchedEffect
+
+            // ── Remove markers that are no longer active (Crucial for Restart) ──
+            val activeIds = demoDrones.map { it.id }.toSet()
+            val staleIds = demoDroneMarkers.keys - activeIds
+            staleIds.forEach { id ->
+                demoDroneMarkers.remove(id)?.let { map.removeMarker(it) }
+            }
+
+            demoDrones.forEach { drone ->
+                val pos = LatLng(drone.lat, drone.lon)
+                val existing = demoDroneMarkers[drone.id]
+
+                if (existing != null) {
+                    existing.position = pos
+                } else {
+                    val ringColor = if (drone.isFriend) {
+                        android.graphics.Color.parseColor("#00B0FF") // Tactical Blue
+                    } else {
+                        android.graphics.Color.parseColor("#E53935") // Alert Red
+                    }
+
+                    val iconSizePx = (50 * context.resources.displayMetrics.density).toInt()
+                    val bitmap = android.graphics.Bitmap.createBitmap(iconSizePx, iconSizePx, android.graphics.Bitmap.Config.ARGB_8888)
+                    val canvas = android.graphics.Canvas(bitmap)
+
+                    // Pure White Circle Background
+                    val basePaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+                        color = android.graphics.Color.WHITE
+                        style = android.graphics.Paint.Style.FILL
+                    }
+                    canvas.drawCircle(iconSizePx / 2f, iconSizePx / 2f, (iconSizePx / 2f) - 4f, basePaint)
+
+                    // Outer Colored Ring
+                    val ringPaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+                        color = ringColor
+                        style = android.graphics.Paint.Style.STROKE
+                        strokeWidth = 6f
+                    }
+                    canvas.drawCircle(iconSizePx / 2f, iconSizePx / 2f, (iconSizePx / 2f) - 4f, ringPaint)
+
+                    val drawable = androidx.core.content.res.ResourcesCompat.getDrawable(context.resources, org.meshtastic.app.R.drawable.marker_drone, null)
+                    val pad = (iconSizePx * 0.22f).toInt()
+                    drawable?.setBounds(pad, pad, iconSizePx - pad, iconSizePx - pad)
+                    drawable?.draw(canvas)
+
+                    val icon = org.maplibre.android.annotations.IconFactory.getInstance(context).fromBitmap(bitmap)
+                    val marker = map.addMarker(
+                        org.maplibre.android.annotations.MarkerOptions()
+                            .position(pos)
+                            .title(drone.callsign)
+                            .snippet("DRONE_TAP:${drone.id}")
+                            .icon(icon)
+                    )
+                    demoDroneMarkers[drone.id] = marker
+                }
+            }
+        }
+
+// Marker click interceptor for inspection details
+//        DisposableEffect(mapLibreMap, demoDrones) {
+//            mapLibreMap?.setOnMarkerClickListener { marker ->
+//                val snippet = marker.snippet ?: ""
+//                if (snippet.startsWith("DRONE_TAP:")) {
+//                    val droneId = snippet.removePrefix("DRONE_TAP:")
+//                    inspectedDrone = demoDrones.firstOrNull { it.id == droneId }
+//                    true
+//                } else false
+//            }
+//            onDispose {}
+//        }
+
+// Draw the Phase 2 Non-DJI Threat Zone
+        LaunchedEffect(demoThreatZone, styleLoaded, mapLibreMap) {
+            if (!styleLoaded || !isDemoActive) return@LaunchedEffect
+            val map = mapLibreMap ?: return@LaunchedEffect
+            MapLibreHelper.updateRfThreatZone(map, demoThreatZone)
+        }
+
+
+
+
         // ── Update zones ──
         // ── Update zones and dynamically count units inside them ──
         // ── Update zones and dynamically count units inside them ──
@@ -718,14 +915,29 @@ class FdroidMapViewProvider : MapViewProvider {
                             // NEW: Marker Click Listener for Quick Messaging
                             // Marker Click Listener for Action Selection Menu
                             map.setOnMarkerClickListener { marker ->
-                                val nodeId = marker.snippet?.replace("Node: ", "") ?: return@setOnMarkerClickListener false
+                                val snippet = marker.snippet ?: ""
+
+                                // 1. Tapping a simulated drone -> fetch directly from engine state
+                                if (snippet.startsWith("DRONE_TAP:")) {
+                                    val droneId = snippet.removePrefix("DRONE_TAP:")
+                                    inspectedDrone = org.meshtastic.app.demo.DemoSimulationEngine.activeDrones.value.firstOrNull { it.id == droneId }
+                                    return@setOnMarkerClickListener true
+                                }
+
+                                // 2. Ignore clicks on base station pins so no comms dialog is shown
+                                if (snippet.startsWith("STATION:")) {
+                                    return@setOnMarkerClickListener true
+                                }
+
+                                // 3. Tapping a normal node -> opens tactical comms menu
+                                val nodeId = snippet.replace("Node: ", "")
                                 val myNodeNum = mapViewModel.myNodeInfo.value?.myNodeNum?.toString()
 
-                                if (nodeId != myNodeNum) {
+                                if (nodeId.isNotEmpty() && nodeId != myNodeNum) {
                                     selectedRemoteNodeId = nodeId
                                     selectedRemoteNodeName = marker.title ?: "Unknown Unit"
                                     quickMessageText = ""
-                                    showActionMenu = true // <-- Launch the intermediate selection pop-up first
+                                    showActionMenu = true
                                     true
                                 } else {
                                     false
@@ -1088,6 +1300,63 @@ class FdroidMapViewProvider : MapViewProvider {
                     )
                 }
             }
+
+            // ══════════════════════════════════════════════════════════════════
+            // ── TOP BAR TACTICAL HUD: DRONE COUNTS (Inside BoxScope) ──
+            // ══════════════════════════════════════════════════════════════════
+            if (isDemoActive) {
+                androidx.compose.material3.Surface(
+                    modifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .padding(top = 16.dp),
+                    shape = androidx.compose.foundation.shape.RoundedCornerShape(8.dp),
+                    color = Color(0xDD0D1310),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF2E4035)),
+                    shadowElevation = 6.dp
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                        horizontalArrangement = Arrangement.spacedBy(20.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text("TOTAL DRONES", fontSize = 9.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold, color = Color(0xFFA0B2A6))
+                            Text("$demoTotalDrones", fontSize = 18.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.ExtraBold, color = Color.White)
+                        }
+
+                        androidx.compose.material3.VerticalDivider(modifier = Modifier.height(24.dp), color = Color(0xFF2E4035))
+
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text("FRIEND DRONES", fontSize = 9.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold, color = Color(0xFF00B0FF))
+                            Text("$demoFriendDrones", fontSize = 18.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.ExtraBold, color = Color(0xFF00B0FF))
+                        }
+
+                        androidx.compose.material3.VerticalDivider(modifier = Modifier.height(24.dp), color = Color(0xFF2E4035))
+
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text("ENEMY DRONES", fontSize = 9.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold, color = Color(0xFFE53935))
+                            Text("$demoEnemyDrones", fontSize = 18.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.ExtraBold, color = Color(0xFFE53935))
+                        }
+                    }
+                }
+            }
+
+            if (isDemoActive) {
+                Box(
+                    modifier = Modifier
+                        .size(64.dp)
+                        .align(Alignment.TopStart)
+                        .clickable(
+                            interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
+                            indication = null // Completely transparent, zero ripple
+                        ) {
+                            android.widget.Toast.makeText(context, "Restarting Scenario...", android.widget.Toast.LENGTH_SHORT).show()
+                            org.meshtastic.app.demo.DemoSimulationEngine.startSimulation()
+                        }
+                )
+            }
+
+
         }
 
         // ── Color Picker Dialog ──
@@ -1166,6 +1435,67 @@ class FdroidMapViewProvider : MapViewProvider {
                     }) { Text("Cancel") }
                 }
             )
+        }
+
+        // ── TACTICAL DRONE INSPECTION MODAL (MATCHING IMAGE 2) ──
+        // ── SIMPLIFIED DRONE INSPECTION MODAL (Name, ID, Lat, Long, Speed) ──
+        inspectedDrone?.let { drone ->
+            val liveDrone = demoDrones.firstOrNull { it.id == drone.id } ?: drone
+
+            androidx.compose.ui.window.Dialog(onDismissRequest = { inspectedDrone = null }) {
+                androidx.compose.material3.Surface(
+                    shape = androidx.compose.foundation.shape.RoundedCornerShape(8.dp),
+                    color = Color(0xFF0F1713),
+                    border = androidx.compose.foundation.BorderStroke(
+                        1.5.dp,
+                        if (liveDrone.isFriend) Color(0xFF00B0FF) else Color(0xFFE53935)
+                    ),
+                    shadowElevation = 10.dp
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .padding(20.dp)
+                            .fillMaxWidth(),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        // Header: Name & ID
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = liveDrone.callsign,
+                                fontWeight = androidx.compose.ui.text.font.FontWeight.Bold,
+                                fontSize = 17.sp,
+                                color = if (liveDrone.isFriend) Color(0xFF00B0FF) else Color(0xFFE53935)
+                            )
+                            Text(
+                                text = liveDrone.id,
+                                fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold,
+                                fontSize = 13.sp,
+                                color = Color.White
+                            )
+                        }
+
+                        androidx.compose.material3.HorizontalDivider(color = Color(0xFF2E4035))
+
+                        // Core Telemetry: Lat, Long, Speed
+                        Text("Latitude:  ${"%.6f".format(liveDrone.lat)}", color = Color(0xFFA0B2A6), fontSize = 13.sp)
+                        Text("Longitude: ${"%.6f".format(liveDrone.lon)}", color = Color(0xFFA0B2A6), fontSize = 13.sp)
+                        Text("Speed:     ${liveDrone.speedKmh} km/h", color = Color.White, fontSize = 14.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold)
+
+                        Button(
+                            onClick = { inspectedDrone = null },
+                            modifier = Modifier.align(Alignment.End),
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2E4035)),
+                            shape = androidx.compose.foundation.shape.RoundedCornerShape(4.dp)
+                        ) {
+                            Text("CLOSE", color = Color.White, fontSize = 11.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold)
+                        }
+                    }
+                }
+            }
         }
 
         // ── Tactical Action Selection Menu ──
@@ -1640,6 +1970,68 @@ class FdroidMapViewProvider : MapViewProvider {
             val map = mapLibreMap ?: return@LaunchedEffect
             MapLibreHelper.updateRfThreatZone(map, liveRfThreat)
         }
+
+
+
+//        // ══════════════════════════════════════════════════════════════════
+//        // ── PART 4: TOP BAR HUD & DRONE INSPECTION MODAL ──
+//        // ══════════════════════════════════════════════════════════════════
+//
+//
+//        // Drone Inspection Dialog (Shown when tapping any simulated drone)
+//        inspectedDrone?.let { drone ->
+//            androidx.compose.ui.window.Dialog(onDismissRequest = { inspectedDrone = null }) {
+//                androidx.compose.material3.Surface(
+//                    shape = androidx.compose.foundation.shape.RoundedCornerShape(6.dp),
+//                    color = Color(0xFF0F1713),
+//                    border = androidx.compose.foundation.BorderStroke(1.5.dp, if (drone.isFriend) Color(0xFF00B0FF) else Color(0xFFE53935)),
+//                    shadowElevation = 12.dp
+//                ) {
+//                    Column(
+//                        modifier = Modifier
+//                            .padding(18.dp)
+//                            .fillMaxWidth(),
+//                        verticalArrangement = Arrangement.spacedBy(10.dp)
+//                    ) {
+//                        Row(
+//                            modifier = Modifier.fillMaxWidth(),
+//                            horizontalArrangement = Arrangement.SpaceBetween,
+//                            verticalAlignment = Alignment.CenterVertically
+//                        ) {
+//                            Text(
+//                                text = if (drone.isFriend) "FRIENDLY UNIT TARGET" else "HOSTILE THREAT DETECTED",
+//                                fontWeight = androidx.compose.ui.text.font.FontWeight.Bold,
+//                                fontSize = 12.sp,
+//                                color = if (drone.isFriend) Color(0xFF00B0FF) else Color(0xFFE53935)
+//                            )
+//                            Text(
+//                                text = drone.id,
+//                                fontWeight = androidx.compose.ui.text.font.FontWeight.Bold,
+//                                fontSize = 12.sp,
+//                                color = Color.White
+//                            )
+//                        }
+//
+//                        androidx.compose.material3.HorizontalDivider(color = Color(0xFF2E4035))
+//
+//                        Text("Callsign: ${drone.callsign}", color = Color.White, fontSize = 13.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold)
+//                        Text("Latitude:  ${"%.6f".format(drone.lat)}", color = Color(0xFFA0B2A6), fontSize = 12.sp)
+//                        Text("Longitude: ${"%.6f".format(drone.lon)}", color = Color(0xFFA0B2A6), fontSize = 12.sp)
+//                        Text("Altitude:  ${drone.altitudeMeters} m", color = Color(0xFFA0B2A6), fontSize = 12.sp)
+//                        Text("Airspeed:  ${drone.speedKmh} km/h", color = Color(0xFFA0B2A6), fontSize = 12.sp)
+//
+//                        Button(
+//                            onClick = { inspectedDrone = null },
+//                            modifier = Modifier.align(Alignment.End),
+//                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2E4035)),
+//                            shape = androidx.compose.foundation.shape.RoundedCornerShape(2.dp)
+//                        ) {
+//                            Text("CLOSE", color = Color.White, fontSize = 11.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold)
+//                        }
+//                    }
+//                }
+//            }
+//        }
 
 
 
