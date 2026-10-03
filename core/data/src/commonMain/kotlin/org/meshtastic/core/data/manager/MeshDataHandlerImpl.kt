@@ -274,7 +274,7 @@ class MeshDataHandlerImpl(
         } else {
             // Intercept battlefield messages — emit to flow, skip database
             val text = dataPacket.text.orEmpty()
-            if (text.startsWith("Z:") || text.startsWith("ZX:") || text.startsWith("UT:") || text.startsWith("WIPE:") || text.startsWith("DRONE:")) {
+            if (text.startsWith("Z:") || text.startsWith("ZX:") || text.startsWith("UT:") || text.startsWith("WIPE:") || text.startsWith("DRONE:") || text.startsWith("RF:")) {
                 scope.launch { _battlefieldMessages.emit(dataPacket) }
                 return  // do NOT save to database, do NOT show in chat
             }
@@ -407,8 +407,7 @@ class MeshDataHandlerImpl(
         if (dataPacket.dataType != PortNum.TEXT_MESSAGE_APP.value) return false
 
         val text = dataPacket.text.orEmpty()
-
-        if (text.startsWith("Z:") || text.startsWith("ZX:") || text.startsWith("UT:") || text.startsWith("WIPE:") || text.startsWith("DRONE:")) return true
+        if (text.startsWith("Z:") || text.startsWith("ZX:") || text.startsWith("UT:") || text.startsWith("WIPE:") || text.startsWith("DRONE:") || text.startsWith("RF:")) return true
 
         val isFilteringDisabled = getContactSettings(contactKey).filteringDisabled
         return messageFilter.shouldFilter(text, isFilteringDisabled)

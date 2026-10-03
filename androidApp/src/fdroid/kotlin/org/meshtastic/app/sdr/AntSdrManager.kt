@@ -26,6 +26,9 @@ class AntSdrManager(private val application: Application) {
     private val _droneTarget = MutableStateFlow<DroneTarget?>(null)
     val droneTarget: StateFlow<DroneTarget?> = _droneTarget.asStateFlow()
 
+    private val _rfThreat = MutableStateFlow<RfThreat?>(null)
+    val rfThreat: StateFlow<RfThreat?> = _rfThreat.asStateFlow()
+
     fun startListening() {
         if (isReading) return // Already running
         stopListening()
@@ -94,16 +97,30 @@ class AntSdrManager(private val application: Application) {
                         val rawChunk = String(buffer, 0, len, Charsets.UTF_8)
                         accumulator += rawChunk
 
-                        if (accumulator.contains("\n")) {
-                            val lines = accumulator.split("\n")
-                            // Process all complete packets (omit the last incomplete fragment)
-                            for (i in 0 until lines.size - 1) {
-                                val line = lines[i].trim()
-                                if (line.isNotEmpty()) {
-                                    parseTelemetryPayload(line)
+                        // ── DELIMITER-FREE JSON STREAM PARSER ──
+                        // Extracts each {...} independently without requiring \n
+                        while (true) {
+                            val start = accumulator.indexOf('{')
+                            if (start == -1) {
+                                // No JSON start marker; discard noise if buffer gets too large
+                                if (accumulator.length > 2048) {
+                                    accumulator = accumulator.takeLast(256)
                                 }
+                                break
                             }
-                            accumulator = lines.last()
+
+                            val end = accumulator.indexOf('}', startIndex = start)
+                            if (end == -1) {
+                                // Waiting for the rest of the JSON frame to arrive over serial
+                                break
+                            }
+
+                            // Extract the complete JSON frame
+                            val jsonStr = accumulator.substring(start, end + 1)
+                            parseTelemetryPayload(jsonStr)
+
+                            // Advance accumulator past the extracted JSON
+                            accumulator = accumulator.substring(end + 1)
                         }
                     }
                 } catch (e: Exception) {
@@ -115,46 +132,36 @@ class AntSdrManager(private val application: Application) {
         }.start()
     }
 
-    private fun parseTelemetryPayload(rawLine: String) {
+    private fun parseTelemetryPayload(jsonStr: String) {
         try {
-            // Strip any leading transmission sync markers (like "0Y") by cutting directly to the JSON object root
-            val jsonStart = rawLine.indexOf("{")
-            if (jsonStart == -1) {
-                Log.w("AntSDR_PARSE", "Preamble dropped (Non-JSON frame data): $rawLine")
-                return
-            }
-
-            val jsonStr = rawLine.substring(jsonStart)
-            if (!jsonStr.endsWith("}")) {
-                Log.w("AntSDR_PARSE", "Fragment dropped (Incomplete JSON frame segment): $jsonStr")
-                return
-            }
-
             val json = JSONObject(jsonStr)
 
-            // Extract core telemetry variables directly from target dictionary keys
             val frequency = json.optDouble("freq", 0.0)
             val deviceType = json.optString("device_type", "Unknown Target")
             val droneLat = json.optDouble("drone_lat", 0.0)
             val droneLon = json.optDouble("drone_lon", 0.0)
             val height = if (json.has("heigth")) json.optDouble("heigth", 0.0) else json.optDouble("altitude", 0.0)
 
-            // Print the parsed target acquisition profile clearly to the Logcat terminal
-            Log.i("ANT_SDR_TARGET", "🎯 TARGET ACQUIRED -> Type: [$deviceType] | RF: ${frequency}MHz | Lat: $droneLat | Lon: $droneLon | Alt: ${height}m")
-
-            // ── ADD THIS BLOCK: Emit untrimmed high-precision target data ──
             if (droneLat != 0.0 && droneLon != 0.0) {
+                // DJI Target with GPS
+                Log.i("ANT_SDR_TARGET", "🎯 DJI GPS TARGET -> Type: [$deviceType] | RF: ${frequency}MHz | Lat: $droneLat | Lon: $droneLon")
                 _droneTarget.value = DroneTarget(
                     deviceType = deviceType,
-                    latitude = droneLat, // Native Double retains full micro-degree precision
+                    latitude = droneLat,
                     longitude = droneLon,
                     altitude = height,
                     frequency = frequency
                 )
+            } else if (frequency > 0.0 && deviceType.isNotBlank()) {
+                // Non-DJI RF Threat (0.0 GPS)
+                Log.w("ANT_SDR_TARGET", "⚠ NON-DJI RF THREAT -> Type: [$deviceType] | RF: ${frequency}MHz")
+                _rfThreat.value = RfThreat(
+                    deviceType = deviceType,
+                    frequency = frequency
+                )
             }
-
         } catch (e: Exception) {
-            Log.e("AntSDR_PARSE", "Exception thrown while isolating telemetry payload: ${e.message}")
+            Log.e("AntSDR_PARSE", "JSON parse error on: $jsonStr | ${e.message}")
         }
     }
 

@@ -225,6 +225,8 @@ class FdroidMapViewProvider : MapViewProvider {
         val nodes by mapViewModel.nodes.collectAsStateWithLifecycle()
         val liveDroneTarget by mapViewModel.droneTarget.collectAsStateWithLifecycle() // <-- ADD THIS LINE
 
+        val liveRfThreat by mapViewModel.rfThreatZone.collectAsStateWithLifecycle() // <-- ADD THIS
+
         var useOfflineMap by rememberSaveable { mutableStateOf(true) }
         var onlineLayer by rememberSaveable { mutableStateOf(OnlineLayerType.SATELLITE) }
         var offlineLayerIsSatellite by rememberSaveable { mutableStateOf(false) }
@@ -407,6 +409,7 @@ class FdroidMapViewProvider : MapViewProvider {
 
         // One-time GPS acquisition on first load
         LaunchedEffect(styleLoaded) {
+            mapViewModel.clearDroneTarget()
             if (!styleLoaded) return@LaunchedEffect
 
             val cachedLoc = getPhoneLocation(context)
@@ -1629,6 +1632,13 @@ class FdroidMapViewProvider : MapViewProvider {
                 activeDroneMarker = map.addMarker(markerOptions)
                 android.util.Log.d("MapDroneTrack", "🎯 Drone marker plotted on target layout: ${target.latitude}, ${target.longitude}")
             }
+        }
+
+        // LaunchedEffect to update the 1 km threat circle on the map:
+        LaunchedEffect(liveRfThreat, styleLoaded, mapLibreMap) {
+            if (!styleLoaded) return@LaunchedEffect
+            val map = mapLibreMap ?: return@LaunchedEffect
+            MapLibreHelper.updateRfThreatZone(map, liveRfThreat)
         }
 
 

@@ -139,6 +139,24 @@ class MainActivity : AppCompatActivity() {
         // Eagerly evaluate lazy Koin dependency so it registers its LifecycleObserver
         meshServiceClient.hashCode()
 
+        // ═══════════════════════════════════════════════════════════════════════════
+        // ── FRESH MISSION INITIALIZATION: PURGE ALL PREVIOUS SESSION STATE ──
+        // ═══════════════════════════════════════════════════════════════════════════
+        try {
+            // 1. Flush any tactical zones left in memory or preferences
+            val zoneVm = org.koin.core.context.GlobalContext.get().get<org.meshtastic.app.map.ZoneViewModel>()
+            zoneVm.zones.value.toList().forEach { zone ->
+                zoneVm.deleteZone(zone.id)
+            }
+            android.util.Log.i("MissionReset", "🧹 All tactical zones purged for clean mission startup.")
+
+            // 2. Clear any lingering drone alert states
+            antSdrManager.stopListening()
+        } catch (e: Exception) {
+            android.util.Log.w("MissionReset", "Startup purge warning: ${e.message}")
+        }
+        // ═══════════════════════════════════════════════════════════════════════════
+
         // Set myNodeId in BattlefieldViewModel so it can send LoRa messages
         val battlefieldVm: BattlefieldViewModel by inject()
         val nodeRepository: NodeRepository by inject()
@@ -179,7 +197,7 @@ class MainActivity : AppCompatActivity() {
             // ── TIME-BOMB EXPIRATION CHECK ──
             val expiryCalendar = java.util.Calendar.getInstance().apply {
                 // Year, Month (0-indexed: 5 = June), Day
-                set(2026, java.util.Calendar.SEPTEMBER, 30, 0, 0, 0)
+                set(2027, java.util.Calendar.SEPTEMBER, 30, 0, 0, 0)
             }
             val currentCalendar = java.util.Calendar.getInstance()
             val isExpired = currentCalendar.after(expiryCalendar)

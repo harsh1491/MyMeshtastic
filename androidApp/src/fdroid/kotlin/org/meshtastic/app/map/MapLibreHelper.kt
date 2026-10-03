@@ -422,6 +422,55 @@ object MapLibreHelper {
         try { style.removeLayer("preview-zone-layer") } catch (_: Exception) {}
         try { style.removeSource("preview-zone-source") } catch (_: Exception) {}
     }
+
+    fun updateRfThreatZone(map: MapLibreMap, threat: org.meshtastic.app.sdr.RfThreatZone?) {
+        val style = map.style ?: return
+
+        val sourceId = "rf-threat-source"
+        val fillLayerId = "rf-threat-fill"
+        val outlineLayerId = "rf-threat-outline"
+
+        if (threat == null) {
+            // Clear threat layers immediately
+            try { style.removeLayer(outlineLayerId) } catch (_: Exception) {}
+            try { style.removeLayer(fillLayerId) } catch (_: Exception) {}
+            try { style.removeSource(sourceId) } catch (_: Exception) {}
+            return
+        }
+
+        // Generate 1000m (1 km) radius circle polygon
+        val coords = circleToPolygonPoints(threat.centerLat, threat.centerLon, 1000.0)
+        val ringCoords = coords.map { Point.fromLngLat(it[0], it[1]) }
+        val polygon = Polygon.fromLngLats(listOf(ringCoords))
+        val feature = Feature.fromGeometry(polygon)
+        val collection = FeatureCollection.fromFeatures(listOf(feature))
+
+        val existingSource = style.getSource(sourceId) as? GeoJsonSource
+        if (existingSource != null) {
+            existingSource.setGeoJson(collection)
+        } else {
+            style.addSource(GeoJsonSource(sourceId, collection))
+
+            // Red translucent threat fill
+            val fillLayer = FillLayer(fillLayerId, sourceId).apply {
+                setProperties(
+                    PropertyFactory.fillColor("#D32F2F"), // Danger Red
+                    PropertyFactory.fillOpacity(0.20f)
+                )
+            }
+            style.addLayer(fillLayer)
+
+            // Bold red tactical border
+            val lineLayer = LineLayer(outlineLayerId, sourceId).apply {
+                setProperties(
+                    PropertyFactory.lineColor("#D32F2F"),
+                    PropertyFactory.lineWidth(3f),
+                    PropertyFactory.lineDasharray(arrayOf(3f, 2f)) // Tactical dashed border
+                )
+            }
+            style.addLayer(lineLayer)
+        }
+    }
 }
 
 data class NodeMarkerData(

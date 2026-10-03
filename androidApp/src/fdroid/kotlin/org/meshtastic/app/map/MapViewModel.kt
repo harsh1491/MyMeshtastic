@@ -58,6 +58,15 @@ class MapViewModel(
     private var lastAlarmTimestamp = 0L // Cooldown tracking variable to prevent audio spam
     private var lastDroneSeenTimestamp = 0L
 
+    // ──Records exact session start time ──
+    private val sessionStartTime = System.currentTimeMillis()
+
+    // ── 1. StateFlow for the 1 km Threat Zone ──
+    private val _rfThreatZone = MutableStateFlow<org.meshtastic.app.sdr.RfThreatZone?>(null)
+    val rfThreatZone: StateFlow<org.meshtastic.app.sdr.RfThreatZone?> = _rfThreatZone.asStateFlow()
+
+    private var lastRfThreatSeenTimestamp = 0L
+
     fun setWaypointId(id: Int?) {
         if (_selectedWaypointId.value != id) {
             _selectedWaypointId.value = id
@@ -80,7 +89,7 @@ class MapViewModel(
         val lat = "%.6f".format(zone.centerLat)
         val lon = "%.6f".format(zone.centerLon)
         val radius = zone.radiusMeters.toInt()
-        val msg = "Z:$lat,$lon,$radius,$colorChar"
+        val msg = "Z:$lat,$lon,$radius,$colorChar,${System.currentTimeMillis()}"
         android.util.Log.d("ZoneSync", "Sending zone: $msg")
         sendRawMessage(msg)
     }
@@ -101,34 +110,79 @@ class MapViewModel(
     }
 
     init {
-
-        // ── ADD THIS ENGINE: 5-Second Drone Inactivity Timeout Sweeper ──
-        safeLaunch(context = ioDispatcher, tag = "droneTimeoutSweeper") {
+        // ── 5-Second Inactivity Timeout Sweeper (Drones + RF Threat Zones) ──
+        safeLaunch(context = ioDispatcher, tag = "threatTimeoutSweeper") {
             while (true) {
-                kotlinx.coroutines.delay(1000) // Check the clock once per second
-                if (_unifiedDroneTarget.value != null && (System.currentTimeMillis() - lastDroneSeenTimestamp) > 5000) {
-                    android.util.Log.w("DroneTrack", "⏱ Inactivity Timeout: No drone telemetry received for 5s. Clearing target.")
-                    _unifiedDroneTarget.value = null // Clears the flow state completely
+                kotlinx.coroutines.delay(1000)
+                val now = System.currentTimeMillis()
+
+                // Sweep DJI Target
+                if (_unifiedDroneTarget.value != null && (now - lastDroneSeenTimestamp) > 5000) {
+                    _unifiedDroneTarget.value = null
+                }
+
+                // Sweep Non-DJI RF 1km Threat Zone
+                if (_rfThreatZone.value != null && (now - lastRfThreatSeenTimestamp) > 5000) {
+                    android.util.Log.w("RfThreat", "⏱ Inactivity Timeout: 5s elapsed without RF packets. Clearing 1km Threat Zone.")
+                    _rfThreatZone.value = null
                 }
             }
         }
 
-
-        // Pipeline A: Monitor the LOCAL physical AntSDR USB-C port thread
+        // Pipeline A1: Local SDR DJI Detections
         safeLaunch(context = ioDispatcher, tag = "localSdrListener") {
             antSdrManager.droneTarget.collect { target ->
                 if (target != null) {
-                    lastDroneSeenTimestamp = System.currentTimeMillis() // ── RESET TIMEOUT ──
+                    lastDroneSeenTimestamp = System.currentTimeMillis()
                     _unifiedDroneTarget.value = target
                     triggerAlarmAudioNotification()
 
-                    val payload = "DRONE:${target.latitude},${target.longitude},${target.deviceType},${target.altitude},${target.frequency}"
+                    val payload = "DRONE:${target.latitude},${target.longitude},${target.deviceType},${target.altitude},${target.frequency},${System.currentTimeMillis()}"
                     sendRawMessage(payload)
                 }
             }
         }
 
-        // Pipeline B: Monitor incoming mesh network messages from REMOTE teammates
+        // Pipeline A2: Local SDR Non-DJI RF Detections
+        safeLaunch(context = ioDispatcher, tag = "localRfThreatListener") {
+            antSdrManager.rfThreat.collect { threat ->
+                if (threat != null) {
+                    // Anchor to detector location (LoRa GPS or Phone GPS)
+                    val myNodeNum = myNodeInfo.value?.myNodeNum
+                    val myNode = nodes.value.firstOrNull { it.num == myNodeNum }
+                    val myLoc = if (myNode?.validPosition != null) {
+                        Pair(myNode.latitude, myNode.longitude)
+                    } else {
+                        // Fallback to last known position
+                        Pair(myNode?.latitude ?: 0.0, myNode?.longitude ?: 0.0)
+                    }
+
+                    if (myLoc.first != 0.0 && myLoc.second != 0.0) {
+                        lastRfThreatSeenTimestamp = System.currentTimeMillis()
+                        _rfThreatZone.value = org.meshtastic.app.sdr.RfThreatZone(
+                            centerLat = myLoc.first,
+                            centerLon = myLoc.second,
+                            frequency = threat.frequency,
+                            deviceType = threat.deviceType
+                        )
+                        triggerAlarmAudioNotification()
+
+                        // Strategy 1 Compact Payload (~28 bytes): RF:lat4,lon4,freqInt,code
+                        val compactCode = toCompactDeviceCode(threat.deviceType)
+                        val payload = "RF:%.4f,%.4f,%d,%s".format(
+                            java.util.Locale.US,
+                            myLoc.first,
+                            myLoc.second,
+                            threat.frequency.toInt(),
+                            compactCode
+                        )
+                        sendRawMessage(payload)
+                    }
+                }
+            }
+        }
+
+        // Pipeline B: Remote Mesh Telemetry Listener
         safeLaunch(context = ioDispatcher, tag = "meshMessageListener") {
             val meshDataHandler: org.meshtastic.core.repository.MeshDataHandler =
                 org.koin.core.context.GlobalContext.get().get()
@@ -138,18 +192,44 @@ class MapViewModel(
                 if (dataPacket.from == DataPacket.ID_LOCAL) return@collect
 
                 when {
-                    text.startsWith("Z:") || text.startsWith("ZX:") ->
-                        parseAndApplyZoneMessage(text)
-                    text.startsWith("UT:") ->
-                        parseAndApplyUnitTypeMessage(text)
-                    text.startsWith("WIPE:") ->
-                        parseAndApplyWipeMessage(text)
+                    text.startsWith("Z:") || text.startsWith("ZX:") -> parseAndApplyZoneMessage(text)
+                    text.startsWith("UT:") -> parseAndApplyUnitTypeMessage(text)
+                    text.startsWith("WIPE:") -> parseAndApplyWipeMessage(text)
                     text.startsWith("DRONE:") -> {
-                        lastDroneSeenTimestamp = System.currentTimeMillis() // ── RESET TIMEOUT ──
+                        lastDroneSeenTimestamp = System.currentTimeMillis()
                         parseAndApplyMeshDroneTarget(text)
+                    }
+                    text.startsWith("RF:") -> {
+                        parseAndApplyMeshRfThreat(text)
                     }
                 }
             }
+        }
+    }
+
+    // ── Parser for Incoming Compact RF Threat Payloads ──
+    private fun parseAndApplyMeshRfThreat(text: String) {
+        try {
+            // Format: RF:lat,lon,freq,code (e.g., RF:28.6139,77.2090,2442,OFDM)
+            val parts = text.removePrefix("RF:").split(",")
+            if (parts.size < 4) return
+
+            val lat = parts[0].toDouble()
+            val lon = parts[1].toDouble()
+            val freq = parts[2].toDouble()
+            val code = parts[3].trim()
+
+            lastRfThreatSeenTimestamp = System.currentTimeMillis()
+            _rfThreatZone.value = org.meshtastic.app.sdr.RfThreatZone(
+                centerLat = lat,
+                centerLon = lon,
+                frequency = freq,
+                deviceType = code
+            )
+
+            triggerAlarmAudioNotification()
+        } catch (e: Exception) {
+            android.util.Log.e("MeshRfParser", "Failed parsing mesh RF threat packet: $text", e)
         }
     }
 
@@ -183,6 +263,20 @@ class MapViewModel(
                 text.startsWith("Z:") -> {
                     val parts = text.removePrefix("Z:").split(",")
                     if (parts.size < 4) return
+
+                    // ── SESSION FILTER: Drop zones created before current app launch ──
+                    if (parts.size >= 5) {
+                        val zoneTime = parts[4].toLongOrNull() ?: 0L
+                        if (zoneTime < sessionStartTime) {
+                            android.util.Log.d("ZoneSync", "🧹 Dropped legacy zone from past mission: $text")
+                            return
+                        }
+                    } else {
+                        // Old format without timestamp from earlier tests -> discard
+                        android.util.Log.d("ZoneSync", "🧹 Dropped unversioned legacy zone: $text")
+                        return
+                    }
+
                     val lat = parts[0].toDouble()
                     val lon = parts[1].toDouble()
                     val radius = parts[2].toDouble()
@@ -263,17 +357,31 @@ class MapViewModel(
 
     private fun parseAndApplyMeshDroneTarget(text: String) {
         try {
-            // Format: DRONE:lat,lon,deviceType,altitude,frequency
+            // Format: DRONE:lat,lon,deviceType,altitude,frequency,timestamp
             val parts = text.removePrefix("DRONE:").split(",")
             if (parts.size < 5) return
 
-            val lat = parts[0].toDouble() // Preserves un-truncated floating point accuracy
+            // ── AGE CHECK: Drop drone packets older than 15 seconds ──
+            if (parts.size >= 6) {
+                val packetTime = parts[5].toLongOrNull() ?: 0L
+                val ageMs = System.currentTimeMillis() - packetTime
+                if (ageMs > 15_000L || ageMs < -5_000L) {
+                    android.util.Log.w("MeshDroneParser", "⏱ Discarding expired drone packet ($ageMs ms old).")
+                    return
+                }
+            } else {
+                // Legacy packet from previous days without timestamp -> discard
+                android.util.Log.w("MeshDroneParser", "⏱ Discarding legacy drone packet from old database cache.")
+                return
+            }
+
+            val lat = parts[0].toDouble()
             val lon = parts[1].toDouble()
             val deviceType = parts[2].trim()
             val altitude = parts[3].toDouble()
             val frequency = parts[4].toDouble()
 
-            // Push target data to the map UI collector thread
+            lastDroneSeenTimestamp = System.currentTimeMillis()
             _unifiedDroneTarget.value = org.meshtastic.app.sdr.DroneTarget(
                 deviceType = deviceType,
                 latitude = lat,
@@ -282,7 +390,6 @@ class MapViewModel(
                 frequency = frequency
             )
 
-            // Trigger audio notification sequence for teammates
             triggerAlarmAudioNotification()
 
         } catch (e: Exception) {
@@ -318,6 +425,18 @@ class MapViewModel(
         }
     }
 
+    // Helper to abbreviate device signatures into ~4 bytes
+    private fun toCompactDeviceCode(type: String): String {
+        val upper = type.uppercase()
+        return when {
+            upper.contains("OFDM") -> "OFDM"
+            upper.contains("FPV") -> "FPV"
+            upper.contains("WIFI") || upper.contains("WI-FI") -> "WIFI"
+            upper.contains("BLE") || upper.contains("BLUETOOTH") -> "BLE"
+            else -> type.filter { it.isLetterOrDigit() }.take(5).ifEmpty { "RF" }
+        }
+    }
+
 
     // ── Call this to flush memory states when the map layout is destroyed ──
     fun clearDroneTarget() {
@@ -325,6 +444,8 @@ class MapViewModel(
         lastDroneSeenTimestamp = 0L
         android.util.Log.d("DroneTrack", "Volatile drone state memory completely cleared.")
     }
+
+
 
 
 
