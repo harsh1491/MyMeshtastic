@@ -17,6 +17,8 @@
 package org.meshtastic.core.ui.component
 
 import androidx.compose.animation.AnimatedVisibility
+
+import org.meshtastic.core.resources.company_logo
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.Image
@@ -43,11 +45,10 @@ import kotlinx.coroutines.launch
 import org.jetbrains.compose.resources.getString
 import org.jetbrains.compose.resources.painterResource
 import org.jetbrains.compose.resources.stringResource
-import org.jetbrains.compose.resources.vectorResource
 import org.koin.compose.koinInject
 import org.meshtastic.core.model.Node
 import org.meshtastic.core.resources.Res
-import org.meshtastic.core.resources.ic_meshtastic
+import org.meshtastic.core.resources.ic_meshtasticc
 import org.meshtastic.core.resources.navigate_back
 import org.meshtastic.core.ui.icon.ArrowBack
 import org.meshtastic.core.ui.icon.MeshtasticIcons
@@ -110,30 +111,15 @@ fun MainAppBar(
 /** Reads [LocalEventBranding] to show event artwork (with tap → snackbar), or the default Meshtastic logo. */
 @Composable
 private fun EventAwareBranding() {
-    val eventEdition = LocalEventBranding.current
-    val iconRes = eventEdition?.iconRes
-    if (iconRes != null) {
-        val scope = rememberCoroutineScope()
-        val snackbarManager = koinInject<SnackbarManager>()
-        Image(
-            painter = painterResource(iconRes),
-            contentDescription = eventEdition.name,
-            contentScale = ContentScale.Fit,
-            modifier =
-            Modifier.size(32.dp).clip(CircleShape).clickable(role = Role.Button) {
-                scope.launch {
-                    val message = getString(eventEdition.welcomeMessageRes)
-                    snackbarManager.showSnackbar(message)
-                }
-            },
-        )
-    } else {
-        Image(
-            painter = painterResource(Res.drawable.ic_meshtastic),
-            contentDescription = "Logo",
-            modifier = Modifier.size(32.dp).clip(CircleShape)
-        )
-    }
+    Image(
+        painter = painterResource(Res.drawable.company_logo),
+        contentDescription = "Company Logo",
+        contentScale = ContentScale.Fit,
+        modifier = Modifier
+            .size(36.dp)
+            .padding(start = 2.dp, end = 4.dp)
+        // Note: .clip(CircleShape) removed so the shield shape isn't cropped
+    )
 }
 
 @Composable

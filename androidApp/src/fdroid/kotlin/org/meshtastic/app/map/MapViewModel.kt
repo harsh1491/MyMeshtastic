@@ -124,11 +124,11 @@ class MapViewModel(
                 val baseLon = org.meshtastic.app.demo.DemoSimulationEngine.BASE_LON
 
                 val demoNodes = listOf(
-                    createDemoNode(10101, "commander", "CMD", baseLat, baseLon, 1170, 98, 4.18f, 9.8f, nowSec + 100),
-                    createDemoNode(10102, "detector-1", "DET1", baseLat + 0.0004, baseLon - 0.0024, 1168, 89, 4.05f, 8.5f, nowSec + 80),
-                    createDemoNode(10103, "detector-2", "DET2", baseLat - 0.0003, baseLon + 0.0024, 1172, 91, 4.08f, 8.2f, nowSec + 60),
-                    createDemoNode(10104, "drone1", "DRN1", baseLat + 0.0008, baseLon - 0.0020, 1250, 84, 3.95f, 7.4f, nowSec + 40),
-                    createDemoNode(10105, "drone2", "DRN2", baseLat - 0.0006, baseLon - 0.0022, 1280, 78, 3.86f, 7.1f, nowSec + 20)
+                    createDemoNode(10101, "Commander", "CMD", baseLat, baseLon, 1170, 98, 4.18f, 9.8f, nowSec + 100),
+                    createDemoNode(10102, "Detector-1", "DET1", baseLat + 0.0004, baseLon - 0.0024, 1168, 89, 4.05f, 8.5f, nowSec + 80),
+                    createDemoNode(10103, "Detector-2", "DET2", baseLat - 0.0003, baseLon + 0.0024, 1172, 91, 4.08f, 8.2f, nowSec + 60),
+                    createDemoNode(10104, "drone1", "KUIN-JRMBACBROYDQNOY5", baseLat + 0.0008, baseLon - 0.0020, 1250, 84, 3.95f, 7.4f, nowSec + 40),
+                    createDemoNode(10105, "drone2", "KUIN-VSMSI7UCV5G7G5IB", baseLat - 0.0006, baseLon - 0.0022, 1280, 78, 3.86f, 7.1f, nowSec + 20)
                 )
 
                 val nodeManager: org.meshtastic.core.repository.NodeManager =

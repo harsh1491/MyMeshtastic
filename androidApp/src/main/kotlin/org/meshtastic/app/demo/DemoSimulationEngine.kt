@@ -45,9 +45,9 @@ object DemoSimulationEngine {
 
     // ── Tightened positions (~200m spread) ──
     val stations = listOf(
-        SimulatedStation("STN-CMD", "commander", BASE_LAT, BASE_LON, StationType.COMMANDER),
-        SimulatedStation("STN-DET1", "detector-1", BASE_LAT + 0.0004, BASE_LON - 0.0024, StationType.DETECTOR_DJI), // West
-        SimulatedStation("STN-DET2", "detector-2", BASE_LAT - 0.0003, BASE_LON + 0.0024, StationType.DETECTOR_RF)   // East
+        SimulatedStation("STN-CMD", "Commander", BASE_LAT, BASE_LON, StationType.COMMANDER),
+        SimulatedStation("STN-DET1", "Detector-1", BASE_LAT + 0.0004, BASE_LON - 0.0024, StationType.DETECTOR_DJI), // West
+        SimulatedStation("STN-DET2", "Detector-2", BASE_LAT - 0.0003, BASE_LON + 0.0024, StationType.DETECTOR_RF)   // East
     )
 
     // HUD Counters
@@ -102,7 +102,7 @@ object DemoSimulationEngine {
             delay(4000)
             val friend1 = SimulatedDrone(
                 id = "DRN-FR-01",
-                callsign = "drone1",
+                callsign = "KUIN - JRMBACBROYDQNOY5",
                 isFriend = true,
                 lat = det1.lat + 0.0008,
                 lon = det1.lon - 0.0006,
@@ -122,7 +122,7 @@ object DemoSimulationEngine {
             delay(4000)
             val friend2 = SimulatedDrone(
                 id = "DRN-FR-02",
-                callsign = "drone2",
+                callsign = "KUIN - VSMSI7UCV5G7G5IB",
                 isFriend = true,
                 lat = det1.lat - 0.0007,
                 lon = det1.lon - 0.0009,
